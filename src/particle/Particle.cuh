@@ -1,8 +1,10 @@
 #pragma once
 #include <cuda_runtime.h>
+#include "../boundary/Boundary.cuh"
 
 // 包含所有GPU端粒子的信息和方法
 class GPUParticles{
+    using Boundary = GPUBoundary::Boundary;
 public:
     GPUParticles() = default;
     GPUParticles(const int& particleNum);
@@ -11,7 +13,7 @@ public:
         const double* h_pos_x, const double* h_pos_y, const double* h_pos_z,
         const double* h_vel_x, const double* h_vel_y, const double* h_vel_z, const int* h_global_id, const int* h_local_id, const int* h_cell_id);
     
-    void Move(const double& dt, const double& blockSize);
+    void Move(const double& dt, const double& blockSize, const Boundary* d_boundaries);
     void Sort();
 // protected:
     double* d_mass;
@@ -29,9 +31,10 @@ public:
 
 
 namespace GPUParticleKernels {
+    using Boundary = GPUBoundary::Boundary;
 
     __global__ void moveParticles(double* pos_x, double* pos_y, double* pos_z,
-                                  const double* vel_x, const double* vel_y, const double* vel_z,
-                                  int N, double dt);
+                                  double* vel_x, double* vel_y, double* vel_z,
+                                  int N, double dt, const Boundary* d_boundaries);
     
 }

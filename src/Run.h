@@ -9,6 +9,7 @@
 #include "boundary/OutletBoundary.h"
 #include "boundary/PeriodicBoundary.h"
 #include "boundary/InletBoundary.h"
+#include "boundary/Boundary.cuh"
 #include "io/Output.h"
 #include "cell/Cell.h"
 #include "cell/Cell.cuh"
@@ -33,16 +34,17 @@ public:
     void assignParticle(const double& coef);
     void TransferParticlesFromHostToDevice();
     void TransferCellsFromHostToDevice();
+    void TransferCellsFromDeviceToHost();
     void particlemove();
     void ressignParticle();
     void collision();
-    void assignParticle2cell();
 
 protected:
     std::vector<Cell> m_cells;
     std::vector<Particle> m_particles;
     std::shared_ptr<GPUParticles> d_particles;
     std::shared_ptr<GPUCells> d_cells;
+    GPUBoundary::Boundary* d_boundaries;
     size_t numparticlelocal;
 
     /*mesh*/

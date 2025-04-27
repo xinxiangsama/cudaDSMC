@@ -74,6 +74,22 @@ void Cell::setparticleStartIndex(const int &id)
 {
     m_particleStartIdx = id;
 }
+void Cell::setTemperature(const double &temperature)
+{
+    m_phase->settemperature(temperature);
+}
+void Cell::setRho(const double &Rho)
+{
+    m_phase->setdensity(Rho);
+}
+void Cell::setPressure(const double &Pressure)
+{
+    m_phase->setpressure(Pressure);
+}
+void Cell::setVelocity(const Coord &Velocity)
+{
+    m_phase->setvelocity(Velocity);
+}
 void Cell::allocatevar()
 {
     m_phase = std::make_shared<Phase>();

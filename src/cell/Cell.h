@@ -39,6 +39,10 @@ public:
     void setindex(const Coord& index);
     void setAMRlevel(const AMRlevel& level);
     void setparticleStartIndex(const int& id);
+    void setTemperature(const double& temperature);
+    void setRho(const double& Rho);
+    void setPressure(const double& Pressure);
+    void setVelocity(const Coord& Velocity);
 
     // Functions
     void allocatevar();

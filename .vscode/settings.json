@@ -71,7 +71,8 @@
     "strstream": "cpp",
     "typeindex": "cpp",
     "variant": "cpp",
-    "*.txx": "cpp"
+    "*.txx": "cpp",
+    "__string": "cpp"
   },
   "C_Cpp_Runner.msvcBatchPath": "",
   "C_Cpp_Runner.cCompilerPath": "gcc",

@@ -3,12 +3,25 @@
 #include <stdio.h>
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>
+#include <curand_kernel.h>
+
+extern double Vstd;
+extern double Vmax;
+extern double VHS_coe;
 __constant__ double d_Unidx;
 __constant__ double d_Unidy;
 __constant__ double d_Unidz;
 __constant__ double d_L1;
 __constant__ double d_L2;
 __constant__ double d_L3;
+__constant__ double d_diam;
+__constant__ double d_boltz;
+__constant__ double d_Vtl;
+__constant__ double d_VHS;
+__constant__ double d_Vmax;
+__constant__ double d_Vstd;
+__constant__ double d_tau;
+__constant__ size_t d_Fn;
 
 GPUCells::GPUCells(const int& N) : m_cellNum(N)
 {
@@ -22,6 +35,19 @@ GPUCells::GPUCells(const int& N) : m_cellNum(N)
     cudaMalloc((void**)&d_Rho, sized);
     cudaMalloc((void**)&d_Pressure, sized);
     cudaMalloc((void**)&d_Velocity, size3d);
+
+    cudaMemcpyToSymbol(d_L1, &L1, sizeof(double));
+    cudaMemcpyToSymbol(d_L2, &L2, sizeof(double));
+    cudaMemcpyToSymbol(d_L2, &L2, sizeof(double));
+    cudaMemcpyToSymbol(d_L3, &L3, sizeof(double));
+    cudaMemcpyToSymbol(d_diam, &diam, sizeof(double));
+    cudaMemcpyToSymbol(d_boltz, &boltz, sizeof(double));
+    cudaMemcpyToSymbol(d_Vtl, &Vtl, sizeof(double));
+    cudaMemcpyToSymbol(d_VHS, &VHS_coe, sizeof(double));
+    cudaMemcpyToSymbol(d_Vmax, &Vmax, sizeof(double));
+    cudaMemcpyToSymbol(d_Vstd, &Vstd, sizeof(double));
+    cudaMemcpyToSymbol(d_tau, &tau, sizeof(double));
+    cudaMemcpyToSymbol(d_Fn, &Fn, sizeof(size_t));
 }
 
 GPUCells::~GPUCells()
@@ -41,19 +67,26 @@ void GPUCells::UploadFromHost(const int* h_particleNum, const int* h_particleSta
     cudaMemcpyToSymbol(d_Unidx, &h_Unidx, sizeof(double));
     cudaMemcpyToSymbol(d_Unidy, &h_Unidy, sizeof(double));
     cudaMemcpyToSymbol(d_Unidz, &h_Unidz, sizeof(double));
-    cudaMemcpyToSymbol(d_L1, &L1, sizeof(double));
-    cudaMemcpyToSymbol(d_L2, &L2, sizeof(double));
-    cudaMemcpyToSymbol(d_L2, &L2, sizeof(double));
     
 }
 
-void GPUCells::CalparticleNum(const double *__restrict__ d_pos_x, 
-    const double *__restrict__ d_pos_y, 
-    const double *__restrict__ d_pos_z, 
-    int *__restrict__ d_localID, 
-    int *__restrict__ d_cellID, int particleNum, 
-    int nx, int ny, int nz, 
-    int blockSize)
+void GPUCells::DownloadToHost(const double *h_Temperature, const double *h_Rho, const double *h_Pressure, const double3 *h_Velocity)
+{
+    size_t sized = m_cellNum * sizeof(double);
+    size_t size3d = m_cellNum * sizeof(double3);
+    cudaMemcpy((void*)h_Temperature, d_Temperature, sized, cudaMemcpyDeviceToHost);
+    cudaMemcpy((void*)h_Rho, d_Rho, sized, cudaMemcpyDeviceToHost);
+    cudaMemcpy((void*)h_Pressure, d_Pressure, sized, cudaMemcpyDeviceToHost);
+    cudaMemcpy((void*)h_Velocity, d_Velocity, size3d, cudaMemcpyDeviceToHost);
+}
+
+void GPUCells::CalparticleNum(const double *__restrict__ d_pos_x,
+                              const double *__restrict__ d_pos_y,
+                              const double *__restrict__ d_pos_z,
+                              int *__restrict__ d_localID,
+                              int *__restrict__ d_cellID, int particleNum,
+                              int nx, int ny, int nz,
+                              int blockSize)
 {   
     cudaMemset(d_particleNum, 0, sizeof(int)*m_cellNum);
     int numBlocks = (particleNum + blockSize - 1) / blockSize;
@@ -78,6 +111,43 @@ void GPUCells::CalparticleStartIndex()
     // }
 }
 
+void GPUCells::Collision(double* d_vel_x, double* d_vel_y, double* d_vel_z)
+{
+    int blockSize = 256; // 每个cell用一个block，block内部线程数
+    int numBlocks = m_cellNum;
+    // 一个Block 对应一个Cell ，因为碰撞需要频繁的访问粒子数据，可以利用Shared Memory 将一个cell中的粒子读取到block 共享内存中
+    GPUCellKernels::collisionInCells<<<numBlocks, blockSize>>>(
+        d_vel_x,
+        d_vel_y,
+        d_vel_z,
+        d_particleStartIndex,
+        d_particleNum,
+        m_cellNum
+    );
+    
+    cudaDeviceSynchronize();  // 等待全部完成，便于调试和防止异步错误
+}
+
+void GPUCells::Sample(const double *d_vel_x, const double *d_vel_y, const double *d_vel_z, int totalParticles)
+{
+    int blockSize = 256;
+    int numBlocks = (m_cellNum + blockSize - 1) / blockSize;
+
+    // 一个线程对应一个cell
+    GPUCellKernels::samplingInCells<<<numBlocks, blockSize>>>(
+        d_vel_x, d_vel_y, d_vel_z,
+        d_particleStartIndex,
+        d_particleNum,
+        d_Temperature,
+        d_Rho,
+        d_Velocity,
+        d_Pressure,
+        m_cellNum,
+        totalParticles
+    );
+
+    cudaDeviceSynchronize();
+}
 
 __global__ void GPUCellKernels::CalparticleNumAndLocalID(
     const double* __restrict__ d_pos_x,
@@ -111,3 +181,163 @@ __global__ void GPUCellKernels::CalparticleNumAndLocalID(
         // printf("Particle %d assigned to cell %d with local ID %d\n", idx, cellID, local);
     }
 }
+
+__global__ void GPUCellKernels::collisionInCells(
+    double* d_vel_x, double* d_vel_y, double* d_vel_z,
+    const int* __restrict__ d_particleStartIndex,
+    const int* __restrict__ d_particleNum,
+    int totalCells
+) {
+    __shared__ int collisionNum;
+    int cellID = blockIdx.x;
+    if (cellID >= totalCells) return;
+
+    int start = d_particleStartIndex[cellID];
+    int np = d_particleNum[cellID];
+
+    if (np < 2) return;
+
+    // 计算Srcmax，初始化
+    double Srcmax = 0.0;  // 初版可以设置为一个固定大值或者初始化一轮扫描最大值
+
+    // 计算 M_candidate
+    double cell_volume = d_Unidx * d_Unidy * d_Unidz; // 均匀网格
+    double expected_Mcand = static_cast<double>(np * np) * d_Fn * M_PI * d_diam * d_diam * d_tau / (2.0 * cell_volume);
+    int M_candidate = static_cast<int>(expected_Mcand);
+
+    int tid = threadIdx.x;
+
+    curandState localState;
+    curand_init(clock64() + cellID * 1234 + tid, 0, 0, &localState);
+
+    for (int m = tid; m < M_candidate; m += blockDim.x) {
+        // 随机挑选两个粒子
+        int idx1 = start + curand(&localState) % np;
+        int idx2 = start + curand(&localState) % np;
+        while (idx1 == idx2) {
+            idx2 = start + curand(&localState) % np;
+        }
+
+        // 读取粒子速度
+        double3 v1 = make_double3(d_vel_x[idx1], d_vel_y[idx1], d_vel_z[idx1]);
+        double3 v2 = make_double3(d_vel_x[idx2], d_vel_y[idx2], d_vel_z[idx2]);
+
+        // 相对速度
+        double3 v_rel = make_double3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        double v_rel_mag = sqrt(v_rel.x * v_rel.x + v_rel.y * v_rel.y + v_rel.z * v_rel.z);
+
+        double Src = v_rel_mag * d_diam * d_diam * M_PI * pow((2.0 * d_boltz * (300.0) / (0.5 * mass * v_rel_mag * v_rel_mag)), d_Vtl-0.5) / d_VHS;
+        Srcmax = fmax(Src, Srcmax);  // 可以后续再调整，初版先不动态更新
+
+        double rand01 = curand_uniform(&localState);
+        if (rand01 < Src / Srcmax) {
+            // 碰撞发生，重采相对速度方向
+            double cosr = 2.0 * curand_uniform(&localState) - 1.0;
+            double sinr = sqrt(1.0 - cosr * cosr);
+            double phi = 2.0 * M_PI * curand_uniform(&localState);
+
+            double3 vrel_new = make_double3(
+                cosr,
+                sinr * cos(phi),
+                sinr * sin(phi)
+            );
+
+            double scale = v_rel_mag;
+            vrel_new.x *= scale;
+            vrel_new.y *= scale;
+            vrel_new.z *= scale;
+
+            double3 Vmean = make_double3(
+                0.5 * (v1.x + v2.x),
+                0.5 * (v1.y + v2.y),
+                0.5 * (v1.z + v2.z)
+            );
+
+            // 更新速度
+            d_vel_x[idx1] = Vmean.x + 0.5 * vrel_new.x;
+            d_vel_y[idx1] = Vmean.y + 0.5 * vrel_new.y;
+            d_vel_z[idx1] = Vmean.z + 0.5 * vrel_new.z;
+
+            d_vel_x[idx2] = Vmean.x - 0.5 * vrel_new.x;
+            d_vel_y[idx2] = Vmean.y - 0.5 * vrel_new.y;
+            d_vel_z[idx2] = Vmean.z - 0.5 * vrel_new.z;
+
+            atomicAdd(&collisionNum, 1);
+        }
+    }
+
+    // if (threadIdx.x == 0) {
+    //     printf("Cell %d: Total Collisions = %d\n", cellID, collisionNum);
+    // }
+}
+
+
+
+__global__ void GPUCellKernels::samplingInCells(
+    const double* __restrict__ d_vel_x,
+    const double* __restrict__ d_vel_y,
+    const double* __restrict__ d_vel_z,
+    const int* __restrict__ d_particleStartIndex,
+    const int* __restrict__ d_particleNum,
+    double* __restrict__ d_Temperature,
+    double* __restrict__ d_Rho,
+    double3* __restrict__ d_Velocity,
+    double* __restrict__ d_Pressure,
+    int totalCells,
+    int totalParticles
+) {
+    int cellID = blockIdx.x * blockDim.x + threadIdx.x;
+    if (cellID >= totalCells) return;
+
+    int start = d_particleStartIndex[cellID];
+    int np = d_particleNum[cellID];
+    double cell_volume = d_Unidx * d_Unidy * d_Unidz; // 均匀网格
+
+    if (np == 0) {
+        d_Temperature[cellID] = 0.0;
+        d_Rho[cellID] = 0.0;
+        d_Velocity[cellID] = make_double3(0.0, 0.0, 0.0);
+        d_Pressure[cellID] = 0.0;
+        return;
+    }
+    
+    double vx_sum = 0.0;
+    double vy_sum = 0.0;
+    double vz_sum = 0.0;
+    double E_sum = 0.0;
+
+    for (int i = 0; i < np; ++i) {
+        int idx = start + i;
+        if (idx >= totalParticles) continue;
+
+        double vx = d_vel_x[idx];
+        double vy = d_vel_y[idx];
+        double vz = d_vel_z[idx];
+
+        vx_sum += vx;
+        vy_sum += vy;
+        vz_sum += vz;
+        E_sum += 0.5 * (vx * vx + vy * vy + vz * vz);
+    }
+
+    double inv_np = 1.0 / static_cast<double>(np);
+    double3 v_avg = make_double3(
+        vx_sum * inv_np,
+        vy_sum * inv_np,
+        vz_sum * inv_np
+    );
+
+    double v_avg_sq = 0.5 * (v_avg.x * v_avg.x + v_avg.y * v_avg.y + v_avg.z * v_avg.z);
+    double E_avg = E_sum * inv_np;
+
+    double Rho = static_cast<double>(np * d_Fn) * mass / cell_volume;
+    double T = mass * (2.0/3.0) * (E_avg - v_avg_sq) / d_boltz;
+    double Pressure = (2.0/3.0) * (E_avg - v_avg_sq) * Rho;
+
+    d_Velocity[cellID] = v_avg;
+    d_Temperature[cellID] = T;
+    d_Rho[cellID] = Rho;
+    d_Pressure[cellID] = Pressure;
+}
+    
+    

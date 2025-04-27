@@ -53,22 +53,42 @@ void Run::initialize(int argc, char **argv)
     m_mesh->BindCellwithElement(m_cells);
     m_mesh->cutcell(m_geom.get());
     /*boundary part*/
-    bool ifdisfuse = false;
-    // inlet = std::make_unique<PeriodicBoundary>(Eigen::Vector3d(0.0, 0.5 * L2, 0.5 * L3), Eigen::Vector3d(1.0, 0.0, 0.0), 0, L1);
-    inlet = std::make_unique<InletBoundary>(1);
-    // outlet = std::make_unique<PeriodicBoundary>(Eigen::Vector3d(L1, 0.5 * L2, 0.5 * L3), Eigen::Vector3d(-1.0, 0.0, 0.0), 0, L1);
-    outlet = std::make_unique<OutletBoundary>(Eigen::Vector3d(L1, 0.5 * L2, 0.5 * L3), Eigen::Vector3d(-1.0, 0.0, 0.0));
-    // inlet = std::make_unique<WallBoundary>(Eigen::Vector3d(0.0, 0.5 * L2, 0.5 * L3), Eigen::Vector3d(1.0, 0.0, 0.0), ifdisfuse);
-    // outlet = std::make_unique<WallBoundary>(Eigen::Vector3d(L1, 0.5 * L2, 0.5 * L3), Eigen::Vector3d(-1.0, 0.0, 0.0), ifdisfuse);
-    // wall1 = std::make_unique<WallBoundary>(Eigen::Vector3d(0.5 * L1, 0.0, 0.5 * L3), Eigen::Vector3d(0.0, 1.0, 0.0), ifdisfuse);
-    // wall2 = std::make_unique<WallBoundary>(Eigen::Vector3d(0.5 * L1, L2, 0.5 * L3), Eigen::Vector3d(0.0, -1.0, 0.0), ifdisfuse);
-    wall1 = std::make_unique<OutletBoundary>(Eigen::Vector3d(0.5 * L1, 0.0, 0.5 * L3), Eigen::Vector3d(0.0, 1.0, 0.0));
-    wall2 = std::make_unique<OutletBoundary>(Eigen::Vector3d(0.5 * L1, L2, 0.5 * L3), Eigen::Vector3d(0.0, -1.0, 0.0));
-    // wall3 = std::make_unique<WallBoundary>(Eigen::Vector3d(0.5 * L1, 0.5 * L2, 0.0), Eigen::Vector3d(0.0, 0.0, 1.0), ifdisfuse);
-    // wall4 = std::make_unique<WallBoundary>(Eigen::Vector3d(0.5 * L1, 0.5 * L2, L3), Eigen::Vector3d(0.0, 0.0, -1.0), ifdisfuse);
-    wall3 = std::make_unique<PeriodicBoundary>(Eigen::Vector3d(0.5 * L1, 0.5 * L2, 0.0), Eigen::Vector3d(0.0, 0.0, 1.0), 2, L3);
-    wall4 = std::make_unique<PeriodicBoundary>(Eigen::Vector3d(0.5 * L1, 0.5 * L2, L3), Eigen::Vector3d(0.0, 0.0, -1.0), 2, L3);
-    
+    // 有6个边界
+    GPUBoundary::Boundary h_boundaries[6];
+    //  (x=0，periodic))
+    h_boundaries[0].point = make_double3(0.0, 0.5 * L2, 0.5 * L3);
+    h_boundaries[0].normal = make_double3(1.0, 0.0, 0.0);
+    h_boundaries[0].type = GPUBoundary::BoundaryType::PERIODIC;
+
+    //  (x=L1，periodic))
+    h_boundaries[1].point = make_double3(L1, 0.5 * L2, 0.5 * L3);
+    h_boundaries[1].normal = make_double3(-1.0, 0.0, 0.0);
+    h_boundaries[1].type = GPUBoundary::BoundaryType::PERIODIC;
+
+    // (y=L2，periodic)
+    h_boundaries[2].point = make_double3(0.5 * L1, L2, 0.5 * L3);
+    h_boundaries[2].normal = make_double3(0.0, -1.0, 0.0);
+    h_boundaries[2].type = GPUBoundary::BoundaryType::PERIODIC;
+
+    // (y=0，periodic)
+    h_boundaries[3].point = make_double3(0.5 * L1, 0.0, 0.5 * L3);
+    h_boundaries[3].normal = make_double3(0.0, 1.0, 0.0);
+    h_boundaries[3].type = GPUBoundary::BoundaryType::PERIODIC;
+
+    // (z=0，periodic)
+    h_boundaries[4].point = make_double3(0.5 * L1, 0.5 * L2, 0.0);
+    h_boundaries[4].normal = make_double3(0.0, 0.0, 1.0);
+    h_boundaries[4].type = GPUBoundary::BoundaryType::PERIODIC;
+
+    // (z=L3，periodic)
+    h_boundaries[5].point = make_double3(0.5 * L1, 0.5 * L2, L3);
+    h_boundaries[5].normal = make_double3(0.0, 0.0, -1.0);
+    h_boundaries[5].type = GPUBoundary::BoundaryType::PERIODIC;
+    // malloc并拷贝到GPU
+    Boundary* d_boundaries;
+    cudaMalloc(&d_boundaries, sizeof(Boundary) * 6);
+    cudaMemcpy(d_boundaries, h_boundaries, sizeof(Boundary) * 6, cudaMemcpyHostToDevice);
+
     /*random part*/
     randomgenerator = std::make_unique<Random>();
     /*output part*/
@@ -82,18 +102,6 @@ void Run::initialize(int argc, char **argv)
     d_cells = std::make_shared<GPUCells>(m_cells.size());
     TransferParticlesFromHostToDevice();
     TransferCellsFromHostToDevice();
-    for(int i = 0; i < 100; ++i){
-        d_particles->Move(tau, 128);
-    }
-    // for(auto& cell : m_cells){
-    //     cell.sample();
-    // }
-    // m_output->Write2HDF5("./res/init.h5");
-
-    d_cells->CalparticleNum(d_particles->d_pos_x, d_particles->d_pos_y, d_particles->d_pos_z, d_particles->local_id, d_particles->cell_id,d_particles->N, N1, N2, N3, 128);
-    d_cells->CalparticleStartIndex();
-
-    d_particles->Sort();
 }
 
 void Run::assignParticle(const double& coef)
@@ -148,45 +156,7 @@ void Run::assignParticle(const double& coef)
 
 void Run::particlemove()
 {   
-
-    for(auto& cell : m_cells){
-        auto particles = cell.getparticles();
-        for(auto& particle : particles){
-            // cell.comtimetokenleaving(particle); 
-            // auto dt = cell.getdt();
-            particle->Move(tau);
-
-            if(cell.ifcut()){
-                for(auto& segment : cell.getelement()->getsegments()){
-                    if(segment->isHit(particle->getposition())){
-                        segment->Reflect(particle, tau);
-                    }
-                }
-            }
-
-            if(inlet->isHit(particle->getposition())){
-                inlet->Reflect(particle, tau);
-            }
-            if(outlet->isHit(particle->getposition())){
-                outlet->Reflect(particle, tau);
-            }
-
-            if(wall1->isHit(particle->getposition())){
-                wall1->Reflect(particle, tau);
-            }
-            if(wall2->isHit(particle->getposition())){
-                wall2->Reflect(particle, tau);
-            }
-
-            if(wall3->isHit(particle->getposition())){
-                wall3->Reflect(particle, tau);
-            }
-            if(wall4->isHit(particle->getposition())){
-                wall4->Reflect(particle, tau);
-            }
-
-        }
-    }
+    d_particles->Move(tau, 128, d_boundaries);
 }
 
 void Run::TransferParticlesFromHostToDevice()
@@ -231,69 +201,37 @@ void Run::TransferCellsFromHostToDevice()
     d_cells->UploadFromHost(h_particleNum.data(), h_particleStartIndex.data(), h_Unidx, h_Unidy, h_Unidz);
 }
 
+void Run::TransferCellsFromDeviceToHost()
+{
+    int N = m_cells.size();
+    std::vector<double> h_Temperature(N), h_Rho(N), h_Pressure(N);
+    std::vector<double3> h_Velocity(N);
+    d_cells->DownloadToHost(h_Temperature.data(), h_Rho.data(), h_Pressure.data(), h_Velocity.data());
+    for (int i = 0; i < N; ++i) {
+        auto& cell = m_cells[i];
+        cell.setTemperature(h_Temperature[i]);
+        cell.setRho(h_Rho[i]);
+        cell.setPressure(h_Pressure[i]);
+        cell.setVelocity(Eigen::Vector3d(h_Velocity[i].x, h_Velocity[i].y, h_Velocity[i].z));
+    }
+}
+
 void Run::ressignParticle()
 {   
-    for(auto& cell : m_cells){
-        cell.removeallparticles();
-    }
-
-    inlet->InjetParticle(m_particles);
-    auto t_classify_start = std::chrono::high_resolution_clock::now();
-    std::vector<Particle> particle_out;
-    particle_out.reserve(m_particles.size());
-    size_t i = 0;
-    while (i < m_particles.size()) {
-        auto& particle = m_particles[i];
-        if (!particle.ifvalid()) {
-            // 无效粒子，直接用最后一个覆盖并 pop_back 掉队尾被移动掉的粒子
-            m_particles[i] = std::move(m_particles.back());
-            m_particles.pop_back();
-            continue;
-        }
-    
-        ++i; // 只在当前粒子保留时才前进
-    }
-    auto t_classify_end = std::chrono::high_resolution_clock::now();
-
-
-
-    auto t_assign_start = std::chrono::high_resolution_clock::now();
-    assignParticle2cell();
-    auto t_assign_end = std::chrono::high_resolution_clock::now();
-
-    int N_particle_local = m_particles.size();
-    int N_particle_global {};
-
-    for(auto& cell : m_cells){
-        cell.sortParticle2children();
-        // std::cout << "sort particle to children done!"<<std::endl;
-    }
+    d_cells->CalparticleNum(d_particles->d_pos_x, d_particles->d_pos_y, d_particles->d_pos_z, d_particles->local_id, d_particles->cell_id,d_particles->N, N1, N2, N3, 128);
+    d_cells->CalparticleStartIndex();    
+    d_particles->Sort();
 }
 
 void Run::collision()
 {
-    int Ncollision_local {};
-    for(auto& cell : m_cells){
-        cell.collision();
-        Ncollision_local += cell.getCollisionNum();
-    }
-
-    int Ncollision_global {};
-
+    d_cells->Collision(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z);
 }
 
-void Run::assignParticle2cell()
-{
-    for(auto& particle : m_particles){
-        auto cellID = m_mesh->getIndex(particle.getposition());
-        particle.setcellID(cellID);
-        m_cells[cellID].insertparticle(&particle);
-    }
-}
 
 void Run::solver()
 {
-    for(size_t iter = 0; iter < 5000; ++iter){
+    for(size_t iter = 0; iter < 10000; ++iter){
 
         auto t_start = std::chrono::high_resolution_clock::now();
 
@@ -325,35 +263,21 @@ void Run::solver()
             << std::chrono::duration<double, std::milli>(t_end - t_start).count() << " ms\n";
         ss << "========================================\n";
         std::cout << ss.str();
-        if (iter % 100 == 0) {
-            for(auto& cell : m_cells){
-                cell.sample();
-                // cell.VTS();
-                // cell.genAMRmesh();
-                // std::cout << "gen amr done!"<<std::endl;
-                // cell.sortParticle2children();
-                // std::cout << "sort particle to children done!"<<std::endl; //shouldnt be here!
-            }
-            m_output->Write2HDF5("./res/step" + std::to_string(iter) + ".h5");
-            // m_output->WriteAMRmesh("./res/step" + std::to_string(iter) +"AMRmesh"+".h5");
-            // m_output->Write2VTK("./res/step" + std::to_string(iter));
-            // m_output->WriteAMR2VTK("./res/step" + std::to_string(iter) +"AMRmesh");
-        }
 
-        // if(iter == 0 || iter == 500 || iter == 1000 || iter == 2000 || iter == 4000){
-        //     for(auto& cell : m_cells){
-        //         cell.sample();
-        //         cell.VTS();
-        //         cell.genAMRmesh();
-        //     }
-        // }
+        if(iter % 100 == 0){
+            d_cells->Sample(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z, d_particles->N);
+            TransferCellsFromDeviceToHost();
+            m_output->Write2VTK("./res/result_" + std::to_string(iter));
+        }
     }
-    std::cout << "Simulation Finished" << std::endl;
-    m_output->Write2HDF5("./res/final.h5");
-    std::cout << "Output Finished" << std::endl;
+
+    TransferCellsFromDeviceToHost();
+    m_output->Write2VTK("./res/finalresult");
 }
 
 void Run::finalize()
-{
+{   
+    m_particles.clear();
     m_cells.clear();
+    std::cout << "Simulation Finished" << std::endl;
 }

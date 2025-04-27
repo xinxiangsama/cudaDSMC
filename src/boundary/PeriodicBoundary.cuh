@@ -1,9 +1,11 @@
 #include "Boundary.cuh"
 
 namespace GPUBoundary {
-namespace PeriodicBoundary {
+    namespace PeriodicBoundary {
 
-__device__ inline void reflect(double3& pos, int direction, double length);
+        __device__ void apply(
+            double3& pos, const double3& point, const double3& normal
+        );
 
-}  // namespace PeriodicBoundary
+    }  // namespace PeriodicBoundary
 }  // namespace GPUBoundary

@@ -1,10 +1,24 @@
 #include "PeriodicBoundary.cuh"
+#include "Param.h"
 
-__device__ void GPUBoundary::PeriodicBoundary::reflect(double3 &pos, int direction, double length)
-{
-    double* coord = (direction == 0) ? &pos.x :
-    (direction == 1) ? &pos.y : &pos.z;
+__device__ void GPUBoundary::PeriodicBoundary::apply(
+    double3& pos, const double3& point, const double3& normal
+) {
+    double3 diff = make_double3(
+        pos.x - point.x,
+        pos.y - point.y,
+        pos.z - point.z
+    );
 
-    *coord = (*coord < 0.0) ? fmod(*coord, length) + length
-                : fmod(*coord, length);
+    double dot = diff.x * normal.x + diff.y * normal.y + diff.z * normal.z;
+
+    if (dot > 0.0) {
+        pos.x -= L1 * normal.x;
+        pos.y -= L2 * normal.y;
+        pos.z -= L3 * normal.z;
+    } else if (dot < 0.0) {
+        pos.x += L1 * normal.x;
+        pos.y += L2 * normal.y;
+        pos.z += L3 * normal.z;
+    }
 }
