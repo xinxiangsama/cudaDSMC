@@ -42,7 +42,7 @@ void Run::initialize(int argc, char **argv)
     m_mesh->setnumberCellsY(N2);
     m_mesh->setnumberCellsZ(N3);
 
-    m_geom = std::make_unique<Circle>(128, LargrangianPoint::Coord{Center_x, Center_y, 0.0}, Radius);
+    m_geom = std::make_unique<Circle>(4, LargrangianPoint::Coord{Center_x, Center_y, 0.0}, Radius);
     // m_geom = std::make_unique<Square>(4, LargrangianPoint::Coord{Center_x, Center_y, 0.0}, Radius);
     m_geom->Initialize();
 
@@ -125,9 +125,9 @@ void Run::assignParticle(const double& coef)
             double x = cell.getposition()(0) + (rx - 0.5) * m_mesh->getUnidX();
             double y = cell.getposition()(1) + (ry - 0.5) * m_mesh->getUnidY();
             double z = cell.getposition()(2) + (rz - 0.5) * m_mesh->getUnidZ();
-            // if((x - Center_x) * (x - Center_x) + (y - Center_y) * (y - Center_y) <= 1.5*(Radius * Radius)){
-            //     continue;
-            // }
+            if((x - Center_x) * (x - Center_x) + (y - Center_y) * (y - Center_y) <= 1.5*(Radius * Radius)){
+                continue;
+            }
             auto velocity = randomgenerator->MaxwellDistribution(Vstd);
             velocity(0) += V_jet;
             m_particles.emplace_back(mass, Eigen::Vector3d{x, y, z}, velocity);
@@ -156,7 +156,7 @@ void Run::assignParticle(const double& coef)
 
 void Run::particlemove()
 {   
-    d_particles->Move(tau, 128, d_boundaries);
+    d_particles->Move(tau, 128, d_boundaries, d_cells->d_ifCut, d_cells->d_Segments);
 }
 
 void Run::TransferParticlesFromHostToDevice()
@@ -202,7 +202,20 @@ void Run::TransferCellsFromHostToDevice()
     auto h_Unidx {m_mesh->getUnidX()};
     auto h_Unidy {m_mesh->getUnidY()};
     auto h_Unidz {m_mesh->getUnidZ()};
-    d_cells->UploadFromHost(h_particleNum.data(), h_particleStartIndex.data(), h_Unidx, h_Unidy, h_Unidz);
+
+    std::vector<GPUSegment> h_segments(N);
+    std::vector<int> h_ifcut(N);  // 使用 int 替代 bool
+    for(int i = 0; i < N; ++i){
+        auto& cell = m_cells[i];
+        h_ifcut[i] = cell.ifcut() ? 1 : 0;
+        if(h_ifcut[i]){
+            auto& segment = cell.getelement()->getsegments()[0];
+            h_segments[i] = GPUSegment(segment.get());
+        }else{
+            h_segments[i] = GPUSegment();
+        }
+    }
+    d_cells->UploadFromHost(h_particleNum.data(), h_particleStartIndex.data(), h_Unidx, h_Unidy, h_Unidz, h_ifcut.data(), h_segments.data());
 }
 
 void Run::TransferCellsFromDeviceToHost()
@@ -218,6 +231,11 @@ void Run::TransferCellsFromDeviceToHost()
         cell.setPressure(h_Pressure[i]);
         cell.setVelocity(Eigen::Vector3d(h_Velocity[i].x, h_Velocity[i].y, h_Velocity[i].z));
     }
+}
+
+void Run::TransferCutCellInfoFromHostToDevice()
+{
+    int N = m_cells.size();
 }
 
 void Run::ressignParticle()

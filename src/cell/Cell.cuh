@@ -1,6 +1,7 @@
 #pragma once
 #include <cuda_runtime.h>
 #include <vector>
+#include "object/GPUSegment.cuh"
 
 
 class GPUCells
@@ -8,8 +9,7 @@ class GPUCells
 public:
     GPUCells(const int& N);
     ~GPUCells();
-    void UploadFromHost(const int* h_particleNum, const int* h_particleStartIndex, const double& h_Unidx, const double& h_Unidy, const double& h_Unidz);
-
+    void UploadFromHost(const int* h_particleNum, const int* h_particleStartIndex, const double& h_Unidx, const double& h_Unidy, const double& h_Unidz, const int* h_ifCut, const GPUSegment* h_Segments);
     void DownloadToHost(const double* h_Temperature, const double* h_Rho, const double* h_Pressure, const double3* h_Velocity);
     void CalparticleNum(const double3* __restrict__ d_pos,
         int* __restrict__ d_localID,
@@ -28,6 +28,8 @@ public:
     double* d_Rho {};
     double* d_Pressure {};
     double3* d_Velocity {};
+    int* d_ifCut {};
+    GPUSegment* d_Segments {};
 
     size_t m_cellNum;
 };

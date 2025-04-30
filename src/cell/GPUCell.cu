@@ -29,6 +29,7 @@ GPUCells::GPUCells(const int& N) : m_cellNum(N)
     size_t sizei = N * sizeof(int);
     size_t sized = N * sizeof(double);
     size_t size3d = N * sizeof(double3);
+    size_t sizeb = N * sizeof(bool);
 
     cudaMalloc((void**)&d_particleNum, sizei);
     cudaMalloc((void**)&d_particleStartIndex, sizei);
@@ -37,6 +38,8 @@ GPUCells::GPUCells(const int& N) : m_cellNum(N)
     cudaMalloc((void**)&d_Rho, sized);
     cudaMalloc((void**)&d_Pressure, sized);
     cudaMalloc((void**)&d_Velocity, size3d);
+    cudaMalloc((void**)&d_ifCut, sizei);
+    cudaMalloc((void**)&d_Segments, N * sizeof(GPUSegment));
 
     cudaMemcpyToSymbol(d_L1, &L1, sizeof(double));
     cudaMemcpyToSymbol(d_L2, &L2, sizeof(double));
@@ -61,12 +64,16 @@ GPUCells::~GPUCells()
     cudaFree(d_Rho);
     cudaFree(d_Pressure);
     cudaFree(d_Velocity);
+    cudaFree(d_ifCut);
+    cudaFree(d_Segments);
 }
 
-void GPUCells::UploadFromHost(const int* h_particleNum, const int* h_particleStartIndex, const double& h_Unidx, const double& h_Unidy, const double& h_Unidz)
+void GPUCells::UploadFromHost(const int* h_particleNum, const int* h_particleStartIndex, const double& h_Unidx, const double& h_Unidy, const double& h_Unidz, const int* h_ifCut, const GPUSegment* h_Segments)
 {
     cudaMemcpy(d_particleNum, h_particleNum, m_cellNum * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_particleStartIndex, h_particleStartIndex, m_cellNum * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_ifCut, h_ifCut, m_cellNum * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Segments, h_Segments, m_cellNum * sizeof(GPUSegment), cudaMemcpyHostToDevice);
     cudaMemcpyToSymbol(d_Unidx, &h_Unidx, sizeof(double));
     cudaMemcpyToSymbol(d_Unidy, &h_Unidy, sizeof(double));
     cudaMemcpyToSymbol(d_Unidz, &h_Unidz, sizeof(double));

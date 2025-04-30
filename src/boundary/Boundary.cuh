@@ -62,22 +62,10 @@ namespace GPUBoundary {
         }
     
     }// namespace WallBoundary
-    namespace MovingLid{
-        __device__ __forceinline__ void apply(
-            double3& pos, double3& vel,
-            const double3& point, const double3& normal, const double& LidVelocity, const double& d_Vstd
-        ){
-            // PeriodicBoundary::apply(pos, point, normal);
-            WallBoundary::apply(pos, vel, point, normal);
-            curandState localState;
-            curand_init(999, 0, 0, &localState);
-            auto rand01 {curand_uniform(&localState)};
-            auto a1 = sqrt(-log(rand01)) * d_Vstd;
-            rand01 = curand_uniform(&localState);
-            auto a2 = 2 * M_PI * rand01;
-            rand01 = curand_uniform(&localState);
-            // vel.x = sin(a2) * a1 + LidVelocity;
-            vel.y = -sqrt(-log(rand01)) * d_Vstd;
+    namespace OutflowBoundary{
+        __device__ __forceinline__ void apply()
+        {
+
         }
-    }//namespace MovingLid
+    }// namespace OutflowBoundary
 }  // namespace GPUBoundary

@@ -16,6 +16,7 @@
 #include "object/Circle.h"
 #include "object/Square.h"
 #include "particle/Particle.cuh"
+#include "object/GPUSegment.cuh"
 
 class Output;
 class Run
@@ -35,6 +36,7 @@ public:
     void TransferParticlesFromHostToDevice();
     void TransferConstants();
     void TransferCellsFromHostToDevice();
+    void TransferCutCellInfoFromHostToDevice();
     void TransferCellsFromDeviceToHost();
     void particlemove();
     void ressignParticle();
