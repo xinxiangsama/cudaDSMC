@@ -6,8 +6,8 @@ static constexpr double boltz = 1.3806e-23; // J/K 波尔兹曼常数
 static constexpr double mass = 6.63e-26; // mass argon 分子质量
 static constexpr double diam = 4.17e-10; // eff diam argon 分子直径
 static constexpr double Volume_Particle = M_PI * diam * diam; //分子的体积
-static constexpr unsigned int N_Particle =9.6e7; //总模拟分子数
-static constexpr double tau = 5e-7; //时间步长（s） 需要小于分子平均碰撞频率
+static constexpr unsigned int N_Particle =6.4e7; //总模拟分子数
+static constexpr double tau = 5e-6; //时间步长（s） 需要小于分子平均碰撞频率
 static constexpr double Vtl = 0.81; // also called omega
 static constexpr double VSS_coe = 1.0; 
 
@@ -15,7 +15,7 @@ static constexpr double VSS_coe = 1.0;
 static constexpr double L1 = 16.0e-2; //横向维度 (m)
 static constexpr double L2 = 16.0e-2; //纵向维度 (m)
 static constexpr double L3 = 4.0e-4; 
-static constexpr double Rho= 1.0e-2; // 流场密度 kg/m^3 
+static constexpr double Rho= 1.0e-4; // 流场密度 kg/m^3 
 static constexpr double T = 273.0; // temperature (K)
 
 //=================圆柱参数========================

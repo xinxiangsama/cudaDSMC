@@ -33,6 +33,7 @@ public:
 
     void assignParticle(const double& coef);
     void TransferParticlesFromHostToDevice();
+    void TransferConstants();
     void TransferCellsFromHostToDevice();
     void TransferCellsFromDeviceToHost();
     void particlemove();

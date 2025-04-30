@@ -30,6 +30,7 @@ void Run::initialize(int argc, char **argv)
 {   
     /*cal base var*/
     Vstd = sqrt(2 * boltz * T / mass);
+    std::cout << Vstd << std::endl;
     Vmax = 2 * sqrt(8 / M_PI) * Vstd;
     VHS_coe = GammaFun(2.5 - Vtl);
     /*mesh part*/
@@ -65,14 +66,14 @@ void Run::initialize(int argc, char **argv)
     h_boundaries[1].normal = make_double3(-1.0, 0.0, 0.0);
     h_boundaries[1].type = GPUBoundary::BoundaryType::PERIODIC;
 
-    // (y=L2，periodic)
-    h_boundaries[2].point = make_double3(0.5 * L1, L2, 0.5 * L3);
-    h_boundaries[2].normal = make_double3(0.0, -1.0, 0.0);
+    // (y=0，periodic)
+    h_boundaries[2].point = make_double3(0.5 * L1, 0.0, 0.5 * L3);
+    h_boundaries[2].normal = make_double3(0.0, 1.0, 0.0);
     h_boundaries[2].type = GPUBoundary::BoundaryType::PERIODIC;
 
-    // (y=0，periodic)
-    h_boundaries[3].point = make_double3(0.5 * L1, 0.0, 0.5 * L3);
-    h_boundaries[3].normal = make_double3(0.0, 1.0, 0.0);
+    // (y=L2，periodic)
+    h_boundaries[3].point = make_double3(0.5 * L1, L2, 0.5 * L3);
+    h_boundaries[3].normal = make_double3(0.0, -1.0, 0.0);
     h_boundaries[3].type = GPUBoundary::BoundaryType::PERIODIC;
 
     // (z=0，periodic)
@@ -161,8 +162,7 @@ void Run::particlemove()
 void Run::TransferParticlesFromHostToDevice()
 {   
     int N = m_particles.size();
-    std::vector<double> h_pos_x(N), h_pos_y(N), h_pos_z(N);
-    std::vector<double> h_vel_x(N), h_vel_y(N), h_vel_z(N);
+    std::vector<double3> h_pos(N), h_vel(N);
     std::vector<double> h_mass(N);
     std::vector<int> h_global_id(N), h_local_id(N), h_cell_id(N);
 
@@ -170,19 +170,24 @@ void Run::TransferParticlesFromHostToDevice()
         auto& particle = m_particles[i];
         h_mass[i] = particle.getmass();
 
-        h_pos_x[i] = particle.getposition()(0);
-        h_pos_y[i] = particle.getposition()(1);
-        h_pos_z[i] = particle.getposition()(2);
+        h_pos[i].x = particle.getposition()(0);
+        h_pos[i].y = particle.getposition()(1);
+        h_pos[i].z = particle.getposition()(2);
         h_global_id[i] = particle.getglobalID();
         h_local_id[i] = particle.getlocalID();
         h_cell_id[i] = particle.getcellID();
-        h_vel_x[i] = particle.getvelocity()(0);
-        h_vel_y[i] = particle.getvelocity()(1);
-        h_vel_z[i] = particle.getvelocity()(2);
+        h_vel[i].x = particle.getvelocity()(0);
+        h_vel[i].y = particle.getvelocity()(1);
+        h_vel[i].z = particle.getvelocity()(2);
     }
     d_particles->UploadFromHost(h_mass.data(), 
-            h_pos_x.data(), h_pos_y.data(), h_pos_z.data(), 
-            h_vel_x.data(), h_vel_y.data(), h_vel_z.data(), h_global_id.data(), h_local_id.data(), h_cell_id.data());
+            h_pos.data(), 
+            h_vel.data(), 
+            h_global_id.data(), h_local_id.data(), h_cell_id.data());
+}
+
+void Run::TransferConstants()
+{
 }
 
 void Run::TransferCellsFromHostToDevice()
@@ -217,20 +222,20 @@ void Run::TransferCellsFromDeviceToHost()
 
 void Run::ressignParticle()
 {   
-    d_cells->CalparticleNum(d_particles->d_pos_x, d_particles->d_pos_y, d_particles->d_pos_z, d_particles->local_id, d_particles->cell_id,d_particles->N, N1, N2, N3, 128);
+    d_cells->CalparticleNum(d_particles->d_pos, d_particles->local_id, d_particles->cell_id,d_particles->N, N1, N2, N3, 128);
     d_cells->CalparticleStartIndex();    
     d_particles->Sort(d_cells->d_particleStartIndex);
 }
 
 void Run::collision()
 {
-    d_cells->Collision(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z, d_particles->global_id_sortted);
+    d_cells->Collision(d_particles->d_vel, d_particles->global_id_sortted);
 }
 
 
 void Run::solver()
 {
-    for(size_t iter = 0; iter < 10000; ++iter){
+    for(size_t iter = 0; iter < 30000; ++iter){
 
         auto t_start = std::chrono::high_resolution_clock::now();
 
@@ -264,7 +269,7 @@ void Run::solver()
         std::cout << ss.str();
 
         if(iter % 100 == 0){
-            d_cells->Sample(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z, d_particles->N, d_particles->global_id_sortted);
+            d_cells->Sample(d_particles->d_vel, d_particles->N, d_particles->global_id_sortted);
             TransferCellsFromDeviceToHost();
             m_output->Write2VTK("./res/result_" + std::to_string(iter));
         }

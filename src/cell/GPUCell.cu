@@ -3,25 +3,26 @@
 #include <stdio.h>
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>
+#include <thrust/reduce.h>
 #include <curand_kernel.h>
 
 extern double Vstd;
 extern double Vmax;
 extern double VHS_coe;
-__constant__ double d_Unidx;
-__constant__ double d_Unidy;
-__constant__ double d_Unidz;
-__constant__ double d_L1;
-__constant__ double d_L2;
-__constant__ double d_L3;
-__constant__ double d_diam;
-__constant__ double d_boltz;
-__constant__ double d_Vtl;
-__constant__ double d_VHS;
-__constant__ double d_Vmax;
-__constant__ double d_Vstd;
-__constant__ double d_tau;
-__constant__ size_t d_Fn;
+__device__ __constant__ double d_Unidx;
+__device__ __constant__ double d_Unidy;
+__device__ __constant__ double d_Unidz;
+__device__ __constant__ double d_L1;
+__device__ __constant__ double d_L2;
+__device__ __constant__ double d_L3;
+__device__ __constant__ double d_diam;
+__device__ __constant__ double d_boltz;
+__device__ __constant__ double d_Vtl;
+__device__ __constant__ double d_VHS;
+__device__ __constant__ double d_Vmax;
+__device__ __constant__ double d_Vstd;
+__device__ __constant__ double d_tau;
+__device__ __constant__ size_t d_Fn;
 
 GPUCells::GPUCells(const int& N) : m_cellNum(N)
 {
@@ -31,6 +32,7 @@ GPUCells::GPUCells(const int& N) : m_cellNum(N)
 
     cudaMalloc((void**)&d_particleNum, sizei);
     cudaMalloc((void**)&d_particleStartIndex, sizei);
+    cudaMalloc((void**)&d_collisionCount, sizei);
     cudaMalloc((void**)&d_Temperature, sized);
     cudaMalloc((void**)&d_Rho, sized);
     cudaMalloc((void**)&d_Pressure, sized);
@@ -54,6 +56,7 @@ GPUCells::~GPUCells()
 {
     cudaFree(d_particleNum);
     cudaFree(d_particleStartIndex);
+    cudaFree(d_collisionCount);
     cudaFree(d_Temperature);
     cudaFree(d_Rho);
     cudaFree(d_Pressure);
@@ -80,9 +83,7 @@ void GPUCells::DownloadToHost(const double *h_Temperature, const double *h_Rho, 
     cudaMemcpy((void*)h_Velocity, d_Velocity, size3d, cudaMemcpyDeviceToHost);
 }
 
-void GPUCells::CalparticleNum(const double *__restrict__ d_pos_x,
-                              const double *__restrict__ d_pos_y,
-                              const double *__restrict__ d_pos_z,
+void GPUCells::CalparticleNum(const double3 *__restrict__ d_pos,
                               int *__restrict__ d_localID,
                               int *__restrict__ d_cellID, int particleNum,
                               int nx, int ny, int nz,
@@ -90,7 +91,7 @@ void GPUCells::CalparticleNum(const double *__restrict__ d_pos_x,
 {   
     cudaMemset(d_particleNum, 0, sizeof(int)*m_cellNum);
     int numBlocks = (particleNum + blockSize - 1) / blockSize;
-    GPUCellKernels::CalparticleNumAndLocalID<<<numBlocks, blockSize>>>(d_pos_x, d_pos_y, d_pos_z, d_particleNum, d_localID, d_cellID, particleNum, nx, ny, nz);
+    GPUCellKernels::CalparticleNumAndLocalID<<<numBlocks, blockSize>>>(d_pos, d_particleNum, d_localID, d_cellID, particleNum, nx, ny, nz);
 }
 
 void GPUCells::CalparticleStartIndex()
@@ -111,32 +112,38 @@ void GPUCells::CalparticleStartIndex()
     // }
 }
 
-void GPUCells::Collision(double* d_vel_x, double* d_vel_y, double* d_vel_z, int* global_id_sortted)
+void GPUCells::Collision(double3* d_vel, int* global_id_sortted)
 {
     int threadsPerBlock = 256;
     int numBlocks = (m_cellNum + threadsPerBlock - 1) / threadsPerBlock;
     
     GPUCellKernels::collisionInCells<<<numBlocks, threadsPerBlock>>>(
-        d_vel_x,
-        d_vel_y,
-        d_vel_z,
+        d_vel,
         d_particleStartIndex,
         d_particleNum,
         m_cellNum,
-        global_id_sortted
+        global_id_sortted,
+        d_collisionCount
     );
-    
+
+    int totalCollisions = thrust::reduce(
+        thrust::device_pointer_cast(d_collisionCount),
+        thrust::device_pointer_cast(d_collisionCount + m_cellNum),
+        0,
+        thrust::plus<int>()
+    );
     cudaDeviceSynchronize();  // 等待全部完成，便于调试和防止异步错误
+    std::cout << "Collision Number is : " << totalCollisions << std::endl;
 }
 
-void GPUCells::Sample(const double *d_vel_x, const double *d_vel_y, const double *d_vel_z, int totalParticles, int* global_id_sortted)
+void GPUCells::Sample(const double3 *d_vel, int totalParticles, int* global_id_sortted)
 {
     int blockSize = 256;
     int numBlocks = (m_cellNum + blockSize - 1) / blockSize;
 
     // 一个线程对应一个cell
     GPUCellKernels::samplingInCells<<<numBlocks, blockSize>>>(
-        d_vel_x, d_vel_y, d_vel_z,
+        d_vel,
         d_particleStartIndex,
         d_particleNum,
         d_Temperature,
@@ -152,9 +159,7 @@ void GPUCells::Sample(const double *d_vel_x, const double *d_vel_y, const double
 }
 
 __global__ void GPUCellKernels::CalparticleNumAndLocalID(
-    const double* __restrict__ d_pos_x,
-    const double* __restrict__ d_pos_y,
-    const double* __restrict__ d_pos_z,
+    const double3* __restrict__ d_pos,
     int* __restrict__ d_particleNum,
     int* __restrict__ d_localID,
     int* __restrict__ d_cellID,
@@ -164,9 +169,9 @@ __global__ void GPUCellKernels::CalparticleNumAndLocalID(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= particleNum) return;  // 保护越界
 
-    double x = d_pos_x[idx];
-    double y = d_pos_y[idx];
-    double z = d_pos_z[idx];
+    double x = d_pos[idx].x;
+    double y = d_pos[idx].y;
+    double z = d_pos[idx].z;
 
     int i = static_cast<int>(x / d_Unidx);
     int j = static_cast<int>(y / d_Unidy);
@@ -185,11 +190,12 @@ __global__ void GPUCellKernels::CalparticleNumAndLocalID(
 }
 
 __global__ void GPUCellKernels::collisionInCells(
-    double* d_vel_x, double* d_vel_y, double* d_vel_z,
+    double3* d_vel,
     const int* __restrict__ d_particleStartIndex,
     const int* __restrict__ d_particleNum,
     int totalCells,
-    int* global_id_sortted
+    int* global_id_sortted,
+    int* d_collisionCount
 ) {
     int cellID = blockIdx.x * blockDim.x + threadIdx.x;
     if (cellID >= totalCells) return;
@@ -206,13 +212,12 @@ __global__ void GPUCellKernels::collisionInCells(
     // Cell体积
     double cell_volume = d_Unidx * d_Unidy * d_Unidz;
 
+    double Srcmax = d_Vmax * M_PI * diam * diam;
     // 计算预计碰撞次数
-    double expected_Mcand = static_cast<double>(np * np) * d_Fn * M_PI * d_diam * d_diam * d_tau / (2.0 * cell_volume);
+    double expected_Mcand = static_cast<double>(np * np) * Fn * Srcmax * tau / (2.0 * cell_volume);
     int M_candidate = static_cast<int>(expected_Mcand);
 
-    // 初版统一给定Srcmax
-    double Srcmax = 1.0;
-
+    int local_collision_count {};
     for (int m = 0; m < M_candidate; ++m) {
         // 随机挑选两个不同粒子
         int idx1 = start + (curand(&localState) % np);
@@ -224,15 +229,15 @@ __global__ void GPUCellKernels::collisionInCells(
         int idx2_sorted = global_id_sortted[idx2];
 
         // 读取粒子速度
-        double3 v1 = make_double3(d_vel_x[idx1_sorted], d_vel_y[idx1_sorted], d_vel_z[idx1_sorted]);
-        double3 v2 = make_double3(d_vel_x[idx2_sorted], d_vel_y[idx2_sorted], d_vel_z[idx2_sorted]);
+        double3 v1 = d_vel[idx1_sorted];
+        double3 v2 = d_vel[idx2_sorted];
 
         // 相对速度
         double3 v_rel = make_double3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
         double v_rel_mag = sqrt(v_rel.x * v_rel.x + v_rel.y * v_rel.y + v_rel.z * v_rel.z);
 
         // 碰撞截面
-        double Src = v_rel_mag * d_diam * d_diam * M_PI * pow((2.0 * d_boltz * (300.0) / (0.5 * mass * v_rel_mag * v_rel_mag)), d_Vtl-0.5) / d_VHS;
+        double Src = v_rel_mag * d_diam * d_diam * M_PI * pow((2.0 * d_boltz * T / (0.5 * mass * v_rel_mag * v_rel_mag)), d_Vtl-0.5) / d_VHS;
         Srcmax = fmax(Src, Srcmax);
 
         double rand01 = curand_uniform(&localState);
@@ -260,22 +265,24 @@ __global__ void GPUCellKernels::collisionInCells(
             );
 
             // 更新粒子速度
-            d_vel_x[idx1_sorted] = Vmean.x + 0.5 * vrel_new.x;
-            d_vel_y[idx1_sorted] = Vmean.y + 0.5 * vrel_new.y;
-            d_vel_z[idx1_sorted] = Vmean.z + 0.5 * vrel_new.z;
+            d_vel[idx1_sorted].x = Vmean.x + 0.5 * vrel_new.x;
+            d_vel[idx1_sorted].y = Vmean.y + 0.5 * vrel_new.y;
+            d_vel[idx1_sorted].z = Vmean.z + 0.5 * vrel_new.z;
 
-            d_vel_x[idx2_sorted] = Vmean.x - 0.5 * vrel_new.x;
-            d_vel_y[idx2_sorted] = Vmean.y - 0.5 * vrel_new.y;
-            d_vel_z[idx2_sorted] = Vmean.z - 0.5 * vrel_new.z;
+            d_vel[idx2_sorted].x = Vmean.x - 0.5 * vrel_new.x;
+            d_vel[idx2_sorted].y = Vmean.y - 0.5 * vrel_new.y;
+            d_vel[idx2_sorted].z = Vmean.z - 0.5 * vrel_new.z;
+
+            local_collision_count ++;
         }
     }
+
+    d_collisionCount[cellID] = local_collision_count;
 }
 
 
 __global__ void GPUCellKernels::samplingInCells(
-    const double* __restrict__ d_vel_x,
-    const double* __restrict__ d_vel_y,
-    const double* __restrict__ d_vel_z,
+    const double3* __restrict__ d_vel,
     const int* __restrict__ d_particleStartIndex,
     const int* __restrict__ d_particleNum,
     double* __restrict__ d_Temperature,
@@ -311,9 +318,9 @@ __global__ void GPUCellKernels::samplingInCells(
         if (idx >= totalParticles) continue;
 
         int idx_sortted {global_id_sortted[idx]};
-        double vx = d_vel_x[idx_sortted];
-        double vy = d_vel_y[idx_sortted];
-        double vz = d_vel_z[idx_sortted];
+        double vx = d_vel[idx_sortted].x;
+        double vy = d_vel[idx_sortted].y;
+        double vz = d_vel[idx_sortted].z;
 
         vx_sum += vx;
         vy_sum += vy;
