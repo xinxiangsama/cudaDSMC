@@ -37,6 +37,35 @@ namespace GPUBoundary {
 
     }  // namespace PeriodicBoundary
     namespace WallBoundary {
-
+        __device__ __forceinline__ void apply(
+            double3& pos, double3& vel,
+            const double3& point, const double3& normal
+        ) {
+            // Step 1: 计算从边界点到粒子位置的向量
+            double dx = pos.x - point.x;
+            double dy = pos.y - point.y;
+            double dz = pos.z - point.z;
+    
+            // Step 2: 计算法向分量（点乘）
+            double dot = dx * normal.x + dy * normal.y + dz * normal.z;
+    
+            // Step 3: 位置反射 —— 镜像到边界另一侧
+            pos.x -= 2.0 * dot * normal.x;
+            pos.y -= 2.0 * dot * normal.y;
+            pos.z -= 2.0 * dot * normal.z;
+    
+            // Step 4: 速度反射 —— 法向速度翻转，切向速度不变
+            double vdot = vel.x * normal.x + vel.y * normal.y + vel.z * normal.z;
+            vel.x -= 2.0 * vdot * normal.x;
+            vel.y -= 2.0 * vdot * normal.y;
+            vel.z -= 2.0 * vdot * normal.z;
+        }
+    
     }// namespace WallBoundary
+    namespace MovingLid{
+        __device__ __forceinline__ void apply(
+            double3& pos, double3& vel,
+            const double3& point, const double3& normal
+        )
+    }//namespace MovingLid
 }  // namespace GPUBoundary

@@ -14,7 +14,7 @@ public:
         const double* h_vel_x, const double* h_vel_y, const double* h_vel_z, const int* h_global_id, const int* h_local_id, const int* h_cell_id);
     
     void Move(const double& dt, const double& blockSize, const Boundary* d_boundaries);
-    void Sort();
+    void Sort(const int* d_particleStartIndex);
 // protected:
     double* d_mass;
     double* d_pos_x;
@@ -24,6 +24,7 @@ public:
     double* d_vel_y;
     double* d_vel_z;
     int* global_id;
+    int* global_id_sortted;
     int* cell_id;
     int* local_id;
     int N;
@@ -37,4 +38,5 @@ namespace GPUParticleKernels {
                                   double* vel_x, double* vel_y, double* vel_z,
                                   int N, double dt, const Boundary* d_boundaries);
     
+    __global__ void sortParticles(const int* cell_id, const int* local_id, const int* global_id, int* global_id_sortted, const int* d_particleStartIndex, int N);
 }

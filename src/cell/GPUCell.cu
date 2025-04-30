@@ -111,24 +111,25 @@ void GPUCells::CalparticleStartIndex()
     // }
 }
 
-void GPUCells::Collision(double* d_vel_x, double* d_vel_y, double* d_vel_z)
+void GPUCells::Collision(double* d_vel_x, double* d_vel_y, double* d_vel_z, int* global_id_sortted)
 {
-    int blockSize = 256; // 每个cell用一个block，block内部线程数
-    int numBlocks = m_cellNum;
-    // 一个Block 对应一个Cell ，因为碰撞需要频繁的访问粒子数据，可以利用Shared Memory 将一个cell中的粒子读取到block 共享内存中
-    GPUCellKernels::collisionInCells<<<numBlocks, blockSize>>>(
+    int threadsPerBlock = 256;
+    int numBlocks = (m_cellNum + threadsPerBlock - 1) / threadsPerBlock;
+    
+    GPUCellKernels::collisionInCells<<<numBlocks, threadsPerBlock>>>(
         d_vel_x,
         d_vel_y,
         d_vel_z,
         d_particleStartIndex,
         d_particleNum,
-        m_cellNum
+        m_cellNum,
+        global_id_sortted
     );
     
     cudaDeviceSynchronize();  // 等待全部完成，便于调试和防止异步错误
 }
 
-void GPUCells::Sample(const double *d_vel_x, const double *d_vel_y, const double *d_vel_z, int totalParticles)
+void GPUCells::Sample(const double *d_vel_x, const double *d_vel_y, const double *d_vel_z, int totalParticles, int* global_id_sortted)
 {
     int blockSize = 256;
     int numBlocks = (m_cellNum + blockSize - 1) / blockSize;
@@ -143,7 +144,8 @@ void GPUCells::Sample(const double *d_vel_x, const double *d_vel_y, const double
         d_Velocity,
         d_Pressure,
         m_cellNum,
-        totalParticles
+        totalParticles,
+        global_id_sortted
     );
 
     cudaDeviceSynchronize();
@@ -186,10 +188,10 @@ __global__ void GPUCellKernels::collisionInCells(
     double* d_vel_x, double* d_vel_y, double* d_vel_z,
     const int* __restrict__ d_particleStartIndex,
     const int* __restrict__ d_particleNum,
-    int totalCells
+    int totalCells,
+    int* global_id_sortted
 ) {
-    __shared__ int collisionNum;
-    int cellID = blockIdx.x;
+    int cellID = blockIdx.x * blockDim.x + threadIdx.x;
     if (cellID >= totalCells) return;
 
     int start = d_particleStartIndex[cellID];
@@ -197,41 +199,45 @@ __global__ void GPUCellKernels::collisionInCells(
 
     if (np < 2) return;
 
-    // 计算Srcmax，初始化
-    double Srcmax = 0.0;  // 初版可以设置为一个固定大值或者初始化一轮扫描最大值
+    // 初始化随机数状态器
+    curandState localState;
+    curand_init(clock64() + cellID * 1234, 0, 0, &localState);
 
-    // 计算 M_candidate
-    double cell_volume = d_Unidx * d_Unidy * d_Unidz; // 均匀网格
+    // Cell体积
+    double cell_volume = d_Unidx * d_Unidy * d_Unidz;
+
+    // 计算预计碰撞次数
     double expected_Mcand = static_cast<double>(np * np) * d_Fn * M_PI * d_diam * d_diam * d_tau / (2.0 * cell_volume);
     int M_candidate = static_cast<int>(expected_Mcand);
 
-    int tid = threadIdx.x;
+    // 初版统一给定Srcmax
+    double Srcmax = 1.0;
 
-    curandState localState;
-    curand_init(clock64() + cellID * 1234 + tid, 0, 0, &localState);
-
-    for (int m = tid; m < M_candidate; m += blockDim.x) {
-        // 随机挑选两个粒子
-        int idx1 = start + curand(&localState) % np;
-        int idx2 = start + curand(&localState) % np;
+    for (int m = 0; m < M_candidate; ++m) {
+        // 随机挑选两个不同粒子
+        int idx1 = start + (curand(&localState) % np);
+        int idx2 = start + (curand(&localState) % np);
         while (idx1 == idx2) {
-            idx2 = start + curand(&localState) % np;
+            idx2 = start + (curand(&localState) % np);
         }
+        int idx1_sorted = global_id_sortted[idx1];
+        int idx2_sorted = global_id_sortted[idx2];
 
         // 读取粒子速度
-        double3 v1 = make_double3(d_vel_x[idx1], d_vel_y[idx1], d_vel_z[idx1]);
-        double3 v2 = make_double3(d_vel_x[idx2], d_vel_y[idx2], d_vel_z[idx2]);
+        double3 v1 = make_double3(d_vel_x[idx1_sorted], d_vel_y[idx1_sorted], d_vel_z[idx1_sorted]);
+        double3 v2 = make_double3(d_vel_x[idx2_sorted], d_vel_y[idx2_sorted], d_vel_z[idx2_sorted]);
 
         // 相对速度
         double3 v_rel = make_double3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
         double v_rel_mag = sqrt(v_rel.x * v_rel.x + v_rel.y * v_rel.y + v_rel.z * v_rel.z);
 
+        // 碰撞截面
         double Src = v_rel_mag * d_diam * d_diam * M_PI * pow((2.0 * d_boltz * (300.0) / (0.5 * mass * v_rel_mag * v_rel_mag)), d_Vtl-0.5) / d_VHS;
-        Srcmax = fmax(Src, Srcmax);  // 可以后续再调整，初版先不动态更新
+        Srcmax = fmax(Src, Srcmax);
 
         double rand01 = curand_uniform(&localState);
         if (rand01 < Src / Srcmax) {
-            // 碰撞发生，重采相对速度方向
+            // 碰撞发生，重新采样相对速度方向
             double cosr = 2.0 * curand_uniform(&localState) - 1.0;
             double sinr = sqrt(1.0 - cosr * cosr);
             double phi = 2.0 * M_PI * curand_uniform(&localState);
@@ -253,24 +259,17 @@ __global__ void GPUCellKernels::collisionInCells(
                 0.5 * (v1.z + v2.z)
             );
 
-            // 更新速度
-            d_vel_x[idx1] = Vmean.x + 0.5 * vrel_new.x;
-            d_vel_y[idx1] = Vmean.y + 0.5 * vrel_new.y;
-            d_vel_z[idx1] = Vmean.z + 0.5 * vrel_new.z;
+            // 更新粒子速度
+            d_vel_x[idx1_sorted] = Vmean.x + 0.5 * vrel_new.x;
+            d_vel_y[idx1_sorted] = Vmean.y + 0.5 * vrel_new.y;
+            d_vel_z[idx1_sorted] = Vmean.z + 0.5 * vrel_new.z;
 
-            d_vel_x[idx2] = Vmean.x - 0.5 * vrel_new.x;
-            d_vel_y[idx2] = Vmean.y - 0.5 * vrel_new.y;
-            d_vel_z[idx2] = Vmean.z - 0.5 * vrel_new.z;
-
-            atomicAdd(&collisionNum, 1);
+            d_vel_x[idx2_sorted] = Vmean.x - 0.5 * vrel_new.x;
+            d_vel_y[idx2_sorted] = Vmean.y - 0.5 * vrel_new.y;
+            d_vel_z[idx2_sorted] = Vmean.z - 0.5 * vrel_new.z;
         }
     }
-
-    // if (threadIdx.x == 0) {
-    //     printf("Cell %d: Total Collisions = %d\n", cellID, collisionNum);
-    // }
 }
-
 
 
 __global__ void GPUCellKernels::samplingInCells(
@@ -284,7 +283,8 @@ __global__ void GPUCellKernels::samplingInCells(
     double3* __restrict__ d_Velocity,
     double* __restrict__ d_Pressure,
     int totalCells,
-    int totalParticles
+    int totalParticles,
+    int* global_id_sortted
 ) {
     int cellID = blockIdx.x * blockDim.x + threadIdx.x;
     if (cellID >= totalCells) return;
@@ -310,9 +310,10 @@ __global__ void GPUCellKernels::samplingInCells(
         int idx = start + i;
         if (idx >= totalParticles) continue;
 
-        double vx = d_vel_x[idx];
-        double vy = d_vel_y[idx];
-        double vz = d_vel_z[idx];
+        int idx_sortted {global_id_sortted[idx]};
+        double vx = d_vel_x[idx_sortted];
+        double vy = d_vel_y[idx_sortted];
+        double vz = d_vel_z[idx_sortted];
 
         vx_sum += vx;
         vy_sum += vy;

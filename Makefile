@@ -56,6 +56,7 @@ build/%.o: %.cpp
 clean:
 # rm -f $(OBJECTS) $(EXECUTABLE)
 	rm -rf ./build/src
+	rm -rf ./runsim
 
 # 清理res文件夹下的.h5文件
 clean_result:

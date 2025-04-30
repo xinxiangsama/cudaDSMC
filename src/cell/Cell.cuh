@@ -20,8 +20,8 @@ public:
         int nx, int ny, int nz, int blockSize);
     
     void CalparticleStartIndex();
-    void Collision(double* d_vel_x, double* d_vel_y, double* d_vel_z);
-    void Sample(const double* d_vel_x, const double* d_vel_y, const double* d_vel_z, int totalParticles);
+    void Collision(double* d_vel_x, double* d_vel_y, double* d_vel_z, int* global_id_sortted);
+    void Sample(const double* d_vel_x, const double* d_vel_y, const double* d_vel_z, int totalParticles, int* global_id_sortted);
 // protected:
     int* d_particleNum {};
     int* d_particleStartIndex {};
@@ -50,7 +50,8 @@ namespace GPUCellKernels{
         double* d_vel_x, double* d_vel_y, double* d_vel_z,
         const int* __restrict__ d_particleStartIndex,
         const int* __restrict__ d_particleNum,
-        int totalCells
+        int totalCells,
+        int* global_id_sortted
     );
     
     __global__ void samplingInCells(
@@ -64,6 +65,7 @@ namespace GPUCellKernels{
         double3* __restrict__ d_Velocity,
         double* __restrict__ d_Pressure,
         int totalCells,
-        int totalParticles
+        int totalParticles,
+        int* global_id_sortted
     );
 }

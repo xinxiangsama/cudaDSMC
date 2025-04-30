@@ -24,6 +24,7 @@ GPUParticles::GPUParticles(const int &particleNum) : N(particleNum)
     cudaMalloc((void**)&d_vel_y, sizedoubles);
     cudaMalloc((void**)&d_vel_z, sizedoubles);  
     cudaMalloc((void**)&global_id, sizeints);
+	cudaMalloc((void**)&global_id_sortted, sizeints);
     cudaMalloc((void**)&cell_id, sizeints);
     cudaMalloc((void**)&local_id, sizeints);
 
@@ -39,6 +40,7 @@ GPUParticles::~GPUParticles()
     cudaFree(d_vel_y);
     cudaFree(d_vel_z);
     cudaFree(global_id);
+	cudaFree(global_id_sortted);
     cudaFree(local_id);
     cudaFree(cell_id);
 }
@@ -71,56 +73,11 @@ void GPUParticles::Move(const double &dt, const double &blockSize, const Boundar
     cudaDeviceSynchronize();
 }
 
-void GPUParticles::Sort()
-{
-    // // 把d_cellID作为key，其他属性作为value，按cellID升序排列
-    // thrust::device_ptr<int> d_cellID_ptr = thrust::device_pointer_cast(cell_id);
-    // thrust::device_ptr<double> d_pos_x_ptr = thrust::device_pointer_cast(d_pos_x);
-    // thrust::device_ptr<double> d_pos_y_ptr = thrust::device_pointer_cast(d_pos_y);
-    // thrust::device_ptr<double> d_pos_z_ptr = thrust::device_pointer_cast(d_pos_z);
-    // thrust::device_ptr<double> d_vel_x_ptr = thrust::device_pointer_cast(d_vel_x);
-    // thrust::device_ptr<double> d_vel_y_ptr = thrust::device_pointer_cast(d_vel_y);
-    // thrust::device_ptr<double> d_vel_z_ptr = thrust::device_pointer_cast(d_vel_z);
-    // thrust::device_ptr<double> d_mass_ptr = thrust::device_pointer_cast(d_mass);
-
-    // // 按cellID升序排列粒子
-    // thrust::sort_by_key(d_cellID_ptr, d_cellID_ptr + N, d_pos_x_ptr);
-    // thrust::sort_by_key(d_cellID_ptr, d_cellID_ptr + N, d_pos_y_ptr);
-    // thrust::sort_by_key(d_cellID_ptr, d_cellID_ptr + N, d_pos_z_ptr);
-    // thrust::sort_by_key(d_cellID_ptr, d_cellID_ptr + N, d_vel_x_ptr);
-    // thrust::sort_by_key(d_cellID_ptr, d_cellID_ptr + N, d_vel_y_ptr);
-    // thrust::sort_by_key(d_cellID_ptr, d_cellID_ptr + N, d_vel_z_ptr);
-    // thrust::sort_by_key(d_cellID_ptr, d_cellID_ptr + N, d_mass_ptr);
-
-	// 把d_cellID作为key，其他属性作为value，按cellID升序排列
-	thrust::device_ptr<int> d_cellID_ptr = thrust::device_pointer_cast(cell_id);
-	thrust::device_ptr<double> d_pos_x_ptr = thrust::device_pointer_cast(d_pos_x);
-	thrust::device_ptr<double> d_pos_y_ptr = thrust::device_pointer_cast(d_pos_y);
-	thrust::device_ptr<double> d_pos_z_ptr = thrust::device_pointer_cast(d_pos_z);
-	thrust::device_ptr<double> d_vel_x_ptr = thrust::device_pointer_cast(d_vel_x);
-	thrust::device_ptr<double> d_vel_y_ptr = thrust::device_pointer_cast(d_vel_y);
-	thrust::device_ptr<double> d_vel_z_ptr = thrust::device_pointer_cast(d_vel_z);
-	thrust::device_ptr<double> d_mass_ptr  = thrust::device_pointer_cast(d_mass);
-
-	// 创建zip_iterator，把多个value绑定在一起
-	auto begin_value = thrust::make_zip_iterator(
-		thrust::make_tuple(
-			d_pos_x_ptr,
-			d_pos_y_ptr,
-			d_pos_z_ptr,
-			d_vel_x_ptr,
-			d_vel_y_ptr,
-			d_vel_z_ptr,
-			d_mass_ptr
-		)
-	);
-
-	// 按cellID升序排列粒子
-	thrust::sort_by_key(
-		d_cellID_ptr, d_cellID_ptr + N,
-		begin_value
-	);
-
+void GPUParticles::Sort(const int* d_particleStartIndex)
+{	
+	int blockSize = 128;
+	int numBlocks = (N + blockSize - 1) / blockSize;
+	GPUParticleKernels::sortParticles<<<numBlocks, blockSize>>>(cell_id, local_id, global_id, global_id_sortted, d_particleStartIndex, N);
 }
 
 __global__ void GPUParticleKernels::moveParticles(double* pos_x, double* pos_y, double* pos_z,
@@ -133,24 +90,45 @@ __global__ void GPUParticleKernels::moveParticles(double* pos_x, double* pos_y, 
     pos_x[i] += vel_x[i] * dt;
     pos_y[i] += vel_y[i] * dt;  
 
-    // 手动实现周期性边界和Wall边界
-    
+    /*============边界条件=============*/
     /*x方向*/
     if(pos_x[i] < 0){
-		pos_x[i] = fmod(pos_x[i], L1) + L1;
+		// pos_x[i] = fmod(pos_x[i], L1) + L1;
+        auto pos = make_double3(pos_x[i], pos_y[i], pos_z[i]);
+        // auto point = make_double3(0, 0.5 * L2, 0.5 * L3);
+        // GPUBoundary::PeriodicBoundary::apply(pos, point, make_double3(1, 0, 0));
+        GPUBoundary::PeriodicBoundary::apply(pos, d_boundaries[0].point, d_boundaries[0].normal);
+        pos_x[i] = pos.x;
 	}
 
 	if(pos_x[i] > L1){
-		pos_x[i] = fmod(pos_x[i], L1);
+		// pos_x[i] = fmod(pos_x[i], L1);
+        auto pos = make_double3(pos_x[i], pos_y[i], pos_z[i]);
+        // auto point = make_double3(L1, 0.5 * L2, 0.5 * L3);
+        // GPUBoundary::PeriodicBoundary::apply(pos, point, make_double3(-1, 0, 0));
+        GPUBoundary::PeriodicBoundary::apply(pos, d_boundaries[1].point, d_boundaries[1].normal);
+        pos_x[i] = pos.x;
 	}
 	/*y方向*/
 	if (pos_y[i] < 0) {
-		pos_y[i] = fmod(pos_y[i], L2) + L2;
-		vel_x[i] += 300;
+		// pos_y[i] = fmod(pos_y[i], L2) + L2;
+        auto pos = make_double3(pos_x[i], pos_y[i], pos_z[i]);
+        auto vel = make_double3(vel_x[i], vel_y[i], vel_z[i]);
+        auto point = make_double3(0.5 * L1, 0.0, 0.5 * L3);
+        GPUBoundary::WallBoundary::apply(pos, vel, point, make_double3(0, 1, 0));
+        pos_y[i] = pos.y;
+        vel_y[i] = vel.y;
 	}
 
 	if (pos_y[i] > L2) {
-		pos_y[i] = fmod(pos_y[i], L2);
+		// pos_y[i] = fmod(pos_y[i], L2);
+        auto pos = make_double3(pos_x[i], pos_y[i], pos_z[i]);
+        auto vel = make_double3(vel_x[i], vel_y[i], vel_z[i]);
+        auto point = make_double3(0.5 * L1, L2, 0.5 * L3);
+        GPUBoundary::WallBoundary::apply(pos, vel, point, make_double3(0, -1, 0));
+        pos_y[i] = pos.y;
+        vel_y[i] = vel.y;
+        vel_x[i] = 300;
 	}
 
     // pos_z[i] += vel_z[i] * dt;                       
@@ -164,4 +142,13 @@ __global__ void GPUParticleKernels::moveParticles(double* pos_x, double* pos_y, 
     // }
 
 }
-    
+
+__global__ void GPUParticleKernels::sortParticles(const int *cell_id, const int *local_id, const int *global_id, int *global_id_sortted, const int *d_particleStartIndex, int N)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) 
+        return;
+	
+	int sorted_global_id = d_particleStartIndex[cell_id[i]] + local_id[i];
+	global_id_sortted[sorted_global_id] = global_id[i];
+}

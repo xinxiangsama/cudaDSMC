@@ -85,9 +85,8 @@ void Run::initialize(int argc, char **argv)
     h_boundaries[5].normal = make_double3(0.0, 0.0, -1.0);
     h_boundaries[5].type = GPUBoundary::BoundaryType::PERIODIC;
     // malloc并拷贝到GPU
-    Boundary* d_boundaries;
-    cudaMalloc(&d_boundaries, sizeof(Boundary) * 6);
-    cudaMemcpy(d_boundaries, h_boundaries, sizeof(Boundary) * 6, cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_boundaries, sizeof(GPUBoundary::Boundary) * 6);
+    cudaMemcpy(d_boundaries, h_boundaries, sizeof(GPUBoundary::Boundary) * 6, cudaMemcpyHostToDevice);
 
     /*random part*/
     randomgenerator = std::make_unique<Random>();
@@ -220,12 +219,12 @@ void Run::ressignParticle()
 {   
     d_cells->CalparticleNum(d_particles->d_pos_x, d_particles->d_pos_y, d_particles->d_pos_z, d_particles->local_id, d_particles->cell_id,d_particles->N, N1, N2, N3, 128);
     d_cells->CalparticleStartIndex();    
-    d_particles->Sort();
+    d_particles->Sort(d_cells->d_particleStartIndex);
 }
 
 void Run::collision()
 {
-    d_cells->Collision(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z);
+    d_cells->Collision(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z, d_particles->global_id_sortted);
 }
 
 
@@ -265,14 +264,14 @@ void Run::solver()
         std::cout << ss.str();
 
         if(iter % 100 == 0){
-            d_cells->Sample(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z, d_particles->N);
+            d_cells->Sample(d_particles->d_vel_x, d_particles->d_vel_y, d_particles->d_vel_z, d_particles->N, d_particles->global_id_sortted);
             TransferCellsFromDeviceToHost();
             m_output->Write2VTK("./res/result_" + std::to_string(iter));
         }
     }
 
-    TransferCellsFromDeviceToHost();
-    m_output->Write2VTK("./res/finalresult");
+    // TransferCellsFromDeviceToHost();
+    // m_output->Write2VTK("./res/finalresult");
 }
 
 void Run::finalize()
