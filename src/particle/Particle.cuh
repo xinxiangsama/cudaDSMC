@@ -19,6 +19,8 @@ public:
             const Boundary* d_boundaries,
             const int* d_ifCut, const GPUSegment* d_Segments);
     void Sort(const int* d_particleStartIndex);
+    void Injet();
+    void ResizeStorage(const int& newCapacity);
 // protected:
     double* d_mass;
     double3* d_pos;
@@ -27,7 +29,9 @@ public:
     int* global_id_sortted;
     int* cell_id;
     int* local_id;
+    int* d_injectedCounter;
     int N;
+    int m_Capacity;
 };
 
 
@@ -40,4 +44,13 @@ namespace GPUParticleKernels {
                                   const int* d_ifCut, const GPUSegment* d_Segments, const int* CellID);
     
     __global__ void sortParticles(const int* cell_id, const int* local_id, const int* global_id, int* global_id_sortted, const int* d_particleStartIndex, int N);
+
+    __global__ void InjectParticles(
+        double3* d_pos,
+        double3* d_vel,
+        int*     d_globalID,
+        int N,                      // 已有的粒子数
+        int maxInject,              // 注入的粒子数
+        int* d_injectedCounter      // 原子变量，记录已注入粒子数（决定 global_id）
+    ) ;
 }

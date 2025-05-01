@@ -94,7 +94,7 @@ void Run::initialize(int argc, char **argv)
     /*output part*/
     m_output = std::make_unique<Output>(this);
     /*Initial particle phase*/
-    assignParticle(1.0);
+    assignParticle(0.01);
     for(auto& cell : m_cells){
         cell.allocatevar();
     }
@@ -239,7 +239,7 @@ void Run::TransferCutCellInfoFromHostToDevice()
 }
 
 void Run::ressignParticle()
-{   
+{   d_particles->Injet();
     d_cells->CalparticleNum(d_particles->d_pos, d_particles->local_id, d_particles->cell_id,d_particles->N, N1, N2, N3, 128);
     d_cells->CalparticleStartIndex();    
     d_particles->Sort(d_cells->d_particleStartIndex);
