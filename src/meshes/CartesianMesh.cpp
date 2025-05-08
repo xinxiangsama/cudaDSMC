@@ -107,6 +107,7 @@ void CartesianMesh::cutcell(Geom *geom)
         }
     }
 
+    std::cout << "cut cell num is : "<<cutcell_num<<std::endl;
     // 计算cut cell 的体积 分为 三种情况
     for(auto& element : m_elements){
         if(element->ifcut()){

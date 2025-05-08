@@ -18,6 +18,7 @@ public:
     void Move(const double& dt, const double& blockSize, 
             const Boundary* d_boundaries,
             const int* d_ifCut, const GPUSegment* d_Segments);
+    void DeleteInvalid(int* d_valid);
     void Sort(const int* d_particleStartIndex);
     void Injet();
     void ResizeStorage(const int& newCapacity);
@@ -41,7 +42,7 @@ namespace GPUParticleKernels {
     __global__ void moveParticles(double3* pos,
                                   double3* vel,
                                   int N, double dt, const Boundary* d_boundaries,
-                                  const int* d_ifCut, const GPUSegment* d_Segments, const int* CellID);
+                                  const int* d_ifCut, const GPUSegment* d_Segments, const int* CellID, int* d_valid);
     
     __global__ void sortParticles(const int* cell_id, const int* local_id, const int* global_id, int* global_id_sortted, const int* d_particleStartIndex, int N);
 
@@ -53,4 +54,8 @@ namespace GPUParticleKernels {
         int maxInject,              // 注入的粒子数
         int* d_injectedCounter      // 原子变量，记录已注入粒子数（决定 global_id）
     ) ;
+}
+
+namespace GPURandomKernels{
+    __device__ double3 MaxwellDistribution(const double& Vstd, curandState& localState);
 }

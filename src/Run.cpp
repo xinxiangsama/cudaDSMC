@@ -42,8 +42,9 @@ void Run::initialize(int argc, char **argv)
     m_mesh->setnumberCellsY(N2);
     m_mesh->setnumberCellsZ(N3);
 
-    m_geom = std::make_unique<Circle>(4, LargrangianPoint::Coord{Center_x, Center_y, 0.0}, Radius);
+    m_geom = std::make_unique<Circle>(256, LargrangianPoint::Coord{Center_x, Center_y, 0.0}, Radius);
     // m_geom = std::make_unique<Square>(4, LargrangianPoint::Coord{Center_x, Center_y, 0.0}, Radius);
+    // m_geom = std::make_unique<Abstract>();
     m_geom->Initialize();
 
 
@@ -94,7 +95,7 @@ void Run::initialize(int argc, char **argv)
     /*output part*/
     m_output = std::make_unique<Output>(this);
     /*Initial particle phase*/
-    assignParticle(0.01);
+    assignParticle(1.0);
     for(auto& cell : m_cells){
         cell.allocatevar();
     }
@@ -125,9 +126,9 @@ void Run::assignParticle(const double& coef)
             double x = cell.getposition()(0) + (rx - 0.5) * m_mesh->getUnidX();
             double y = cell.getposition()(1) + (ry - 0.5) * m_mesh->getUnidY();
             double z = cell.getposition()(2) + (rz - 0.5) * m_mesh->getUnidZ();
-            if((x - Center_x) * (x - Center_x) + (y - Center_y) * (y - Center_y) <= 1.5*(Radius * Radius)){
-                continue;
-            }
+            // if((x - Center_x) * (x - Center_x) + (y - Center_y) * (y - Center_y) <= 1.5*(Radius * Radius)){
+            //     continue;
+            // }
             auto velocity = randomgenerator->MaxwellDistribution(Vstd);
             velocity(0) += V_jet;
             m_particles.emplace_back(mass, Eigen::Vector3d{x, y, z}, velocity);
@@ -239,7 +240,8 @@ void Run::TransferCutCellInfoFromHostToDevice()
 }
 
 void Run::ressignParticle()
-{   d_particles->Injet();
+{   
+    d_particles->Injet();
     d_cells->CalparticleNum(d_particles->d_pos, d_particles->local_id, d_particles->cell_id,d_particles->N, N1, N2, N3, 128);
     d_cells->CalparticleStartIndex();    
     d_particles->Sort(d_cells->d_particleStartIndex);
@@ -289,7 +291,8 @@ void Run::solver()
         if(iter % 100 == 0){
             d_cells->Sample(d_particles->d_vel, d_particles->N, d_particles->global_id_sortted);
             TransferCellsFromDeviceToHost();
-            m_output->Write2VTK("./res/result_" + std::to_string(iter));
+            // m_output->Write2VTK("./res/result_" + std::to_string(iter));
+            m_output->Write2HDF5("./res/result_" + std::to_string(iter));
         }
     }
 

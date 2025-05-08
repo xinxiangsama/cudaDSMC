@@ -14,6 +14,7 @@
 #include "cell/Cell.h"
 #include "cell/Cell.cuh"
 #include "object/Circle.h"
+#include "object/Abstract.h"
 #include "object/Square.h"
 #include "particle/Particle.cuh"
 #include "object/GPUSegment.cuh"
