@@ -1,4 +1,5 @@
 #include "Random.h"
+#include "Param.h"
 
 Random::Random()
     : m_mt19937(m_rd()),       // Seed mt19937 with random_device
@@ -42,4 +43,9 @@ Eigen::Vector3d Random::MaxwellDistribution(const double &Vstd)
     auto w = sqrt(-log(rd1)) * sin(2 * M_PI * rd2) * Vstd;
     
     return Eigen::Vector3d(u, v, w);
+}
+
+double Random::RotationalenergySample()
+{
+    return -log(getrandom01()) * boltz * T;
 }

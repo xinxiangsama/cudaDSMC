@@ -13,6 +13,7 @@ public:
     void UploadFromHost(const double* h_mass,
         const double3* h_pos,
         const double3* h_vel, 
+        const double* h_Erot,
         const int* h_global_id, const int* h_local_id, const int* h_cell_id);
     
     void Move(const double& dt, const double& blockSize, 
@@ -26,6 +27,7 @@ public:
     double* d_mass;
     double3* d_pos;
     double3* d_vel;
+    double* d_Erot;
     int* global_id;
     int* global_id_sortted;
     int* cell_id;
@@ -49,6 +51,7 @@ namespace GPUParticleKernels {
     __global__ void InjectParticles(
         double3* d_pos,
         double3* d_vel,
+        double* d_Erot,
         int*     d_globalID,
         int N,                      // 已有的粒子数
         int maxInject,              // 注入的粒子数
@@ -58,4 +61,5 @@ namespace GPUParticleKernels {
 
 namespace GPURandomKernels{
     __device__ double3 MaxwellDistribution(const double& Vstd, curandState& localState);
+    __device__ double RotatinalEnergySample(curandState& localState);
 }

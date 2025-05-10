@@ -16,6 +16,10 @@ const Particle::Coord &Particle::getvelocity()
 {
     return m_velocity;
 }
+const double &Particle::getRotationalEnergy()
+{
+   return m_Erotation;
+}
 const int &Particle::getcellID()
 {
     return m_cellID;
@@ -43,6 +47,11 @@ void Particle::setposition(const Coord &position)
 void Particle::setvelocity(const Coord &velocity)
 {
     m_velocity = velocity;
+}
+
+void Particle::setRotationalEnergy(const double &energy)
+{
+    m_Erotation = energy;
 }
 
 void Particle::settmove(const double &t)

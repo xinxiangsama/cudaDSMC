@@ -18,7 +18,7 @@ public:
         int nx, int ny, int nz, int blockSize);
     
     void CalparticleStartIndex();
-    void Collision(double3* d_vel, int* global_id_sortted);
+    void Collision(double3* d_vel, double* d_Erot, int* global_id_sortted);
     void Sample(const double3* d_vel, int totalParticles, int* global_id_sortted);
 // protected:
     int* d_particleNum {};
@@ -47,6 +47,7 @@ namespace GPUCellKernels{
 
     __global__ void collisionInCells(
         double3* d_vel,
+        double* d_Erot,
         const int* __restrict__ d_particleStartIndex,
         const int* __restrict__ d_particleNum,
         int totalCells,

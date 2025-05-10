@@ -119,13 +119,14 @@ void GPUCells::CalparticleStartIndex()
     // }
 }
 
-void GPUCells::Collision(double3* d_vel, int* global_id_sortted)
+void GPUCells::Collision(double3* d_vel, double* d_Erot, int* global_id_sortted)
 {
     int threadsPerBlock = 256;
     int numBlocks = (m_cellNum + threadsPerBlock - 1) / threadsPerBlock;
     
     GPUCellKernels::collisionInCells<<<numBlocks, threadsPerBlock>>>(
         d_vel,
+        d_Erot,
         d_particleStartIndex,
         d_particleNum,
         m_cellNum,
@@ -198,6 +199,7 @@ __global__ void GPUCellKernels::CalparticleNumAndLocalID(
 
 __global__ void GPUCellKernels::collisionInCells(
     double3* d_vel,
+    double* d_Erot,
     const int* __restrict__ d_particleStartIndex,
     const int* __restrict__ d_particleNum,
     int totalCells,
@@ -227,17 +229,19 @@ __global__ void GPUCellKernels::collisionInCells(
     int local_collision_count {};
     for (int m = 0; m < M_candidate; ++m) {
         // 随机挑选两个不同粒子
-        int idx1 = start + (curand(&localState) % np);
-        int idx2 = start + (curand(&localState) % np);
+        int idx1 = start + static_cast<int>(curand_uniform_double(&localState) * np);
+        int idx2 = start + static_cast<int>(curand_uniform_double(&localState) * np);
         while (idx1 == idx2) {
-            idx2 = start + (curand(&localState) % np);
+            idx2 = start + static_cast<int>(curand_uniform_double(&localState) * np);
         }
         int idx1_sorted = global_id_sortted[idx1];
         int idx2_sorted = global_id_sortted[idx2];
 
-        // 读取粒子速度
+        // 读取粒子速度和转动内能
         double3 v1 = d_vel[idx1_sorted];
         double3 v2 = d_vel[idx2_sorted];
+        auto Erot1 = d_Erot[idx1_sorted];
+        auto Erot2 = d_Erot[idx2_sorted];
 
         // 相对速度
         double3 v_rel = make_double3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
@@ -249,6 +253,27 @@ __global__ void GPUCellKernels::collisionInCells(
 
         double rand01 = curand_uniform(&localState);
         if (rand01 < Src / Srcmax) {
+            // --- 碰撞能量统计 ---
+            // double Etrans = 0.5 * mass * (v1.x*v1.x + v1.y*v1.y + v1.z*v1.z + v2.x*v2.x + v2.y*v2.y + v2.z*v2.z );
+            // double Etrans = 0.5 * mass * (v_rel_mag * v_rel_mag);
+            double Etrans = 0.5 * mass * (v_rel.x * v_rel.x + v_rel.y * v_rel.y + v_rel.z * v_rel.z);
+            double Erot = Erot1 + Erot2;
+            double Etotal = Etrans + Erot;
+
+            // ========接受-拒绝方法采样新的平动动能===================
+            // auto pfun = [=](double& newEtrans){
+            //     return pow((newEtrans / Etotal)*(zeta + 0.5 - Vtl)/(1.5 - Vtl), 1.5 - Vtl) * pow((1 - newEtrans / Etotal)*(zeta + 0.5 - Vtl)/(zeta - 1), (zeta - 1));
+            // };
+            // auto p {-9999.0};
+            // double newEtrans{};
+            // while(p < curand_uniform_double(&localState)){
+            //     newEtrans = curand_uniform_double(&localState) * Etotal;
+            //     p = pfun(newEtrans);
+            // }
+            // // v_rel_mag = sqrt(2 * newEtrans / mass);
+            // v_rel_mag = min(sqrt(2 * newEtrans / mass), sqrt(2 * Etotal / mass));
+            // auto newErot = Etotal - newEtrans;
+
             // 碰撞发生，重新采样相对速度方向
             double cosr = 2.0 * curand_uniform(&localState) - 1.0;
             double sinr = sqrt(1.0 - cosr * cosr);
@@ -261,6 +286,10 @@ __global__ void GPUCellKernels::collisionInCells(
             );
 
             double scale = v_rel_mag;
+            // if(v_rel_mag > 9999.0){
+            //     __syncthreads;
+            //     printf("Error!!!");
+            // }
             vrel_new.x *= scale;
             vrel_new.y *= scale;
             vrel_new.z *= scale;
@@ -281,6 +310,22 @@ __global__ void GPUCellKernels::collisionInCells(
             d_vel[idx2_sorted].z = Vmean.z - 0.5 * vrel_new.z;
 
             local_collision_count ++;
+
+            d_Erot[idx1_sorted] = 0.5 * newErot;
+            d_Erot[idx2_sorted] = 0.5 * newErot;
+            // ========接受-拒绝方法分配转动动能===================
+            // auto pfunrot = [=](double& erot){
+            //     return pow(2, zeta - 2) * pow((erot / newErot), 0.5 * zeta - 1) * pow(1 - (erot / newErot), 0.5 * zeta - 1);
+            // };
+            // auto prot{-9999.0};
+            // double newErot1{}, newErot2{};
+            // while (prot < curand_uniform(&localState)){
+            //     newErot1 = curand_uniform(&localState) * newErot;
+            //     prot = pfunrot(newErot1);
+            // }
+            // newErot2 = newErot - newErot1;
+            // d_Erot[idx1_sorted] = newErot1;
+            // d_Erot[idx2_sorted] = newErot2;
         }
     }
 

@@ -11,6 +11,7 @@ static constexpr unsigned int N_Particle =3.2e7; //总模拟分子数
 static constexpr double tau = 1e-7; //时间步长（s） 需要小于分子平均碰撞频率
 static constexpr double Vtl = 0.81; // also called omega
 static constexpr double VSS_coe = 1.0; 
+static constexpr int zeta = 2; // 转动自由度个数，对于氮气是2
 
 //=================流场参数========================
 static constexpr double L1 = 0.8; //横向维度 (m)

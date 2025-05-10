@@ -14,6 +14,7 @@ public:
     int getrandomint(const int& min, const int& max);
 
     Eigen::Vector3d MaxwellDistribution(const double& Vstd);
+    double RotationalenergySample();
 
 protected:
     std::random_device m_rd;   // Random device for seeding

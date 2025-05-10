@@ -131,7 +131,8 @@ void Run::assignParticle(const double& coef)
             // }
             auto velocity = randomgenerator->MaxwellDistribution(Vstd);
             velocity(0) += V_jet;
-            m_particles.emplace_back(mass, Eigen::Vector3d{x, y, z}, velocity);
+            auto Erot = randomgenerator->RotationalenergySample();
+            m_particles.emplace_back(mass, Eigen::Vector3d{x, y, z}, velocity, Erot);
             std::prev(m_particles.end())->setcellID(m_mesh->getIndex(Eigen::Vector3d{x, y, z}));
             std::prev(m_particles.end())->setlocalID(particle_local_id);
             std::prev(m_particles.end())->setglobalID(particle_global_id);
@@ -164,7 +165,7 @@ void Run::TransferParticlesFromHostToDevice()
 {   
     int N = m_particles.size();
     std::vector<double3> h_pos(N), h_vel(N);
-    std::vector<double> h_mass(N);
+    std::vector<double> h_mass(N), h_Erot(N);
     std::vector<int> h_global_id(N), h_local_id(N), h_cell_id(N);
 
     for (int i = 0; i < N; ++i) {
@@ -180,10 +181,12 @@ void Run::TransferParticlesFromHostToDevice()
         h_vel[i].x = particle.getvelocity()(0);
         h_vel[i].y = particle.getvelocity()(1);
         h_vel[i].z = particle.getvelocity()(2);
+        h_Erot[i] = particle.getRotationalEnergy();
     }
     d_particles->UploadFromHost(h_mass.data(), 
             h_pos.data(), 
             h_vel.data(), 
+            h_Erot.data(),
             h_global_id.data(), h_local_id.data(), h_cell_id.data());
 }
 
@@ -249,7 +252,7 @@ void Run::ressignParticle()
 
 void Run::collision()
 {
-    d_cells->Collision(d_particles->d_vel, d_particles->global_id_sortted);
+    d_cells->Collision(d_particles->d_vel, d_particles->d_Erot, d_particles->global_id_sortted);
 }
 
 

@@ -16,6 +16,7 @@ GPUParticles::GPUParticles(const int &particleNum) : N(particleNum)
     cudaMalloc((void**)&d_mass, sizedoubles);
     cudaMalloc((void**)&d_pos, sizedouble3s);
     cudaMalloc((void**)&d_vel, sizedouble3s);
+    cudaMalloc((void**)&d_Erot, sizedoubles);
     cudaMalloc((void**)&global_id, sizeints);
 	cudaMalloc((void**)&global_id_sortted, sizeints);
     cudaMalloc((void**)&cell_id, sizeints);
@@ -29,6 +30,7 @@ GPUParticles::~GPUParticles()
     cudaFree(d_mass);
     cudaFree(d_pos);
     cudaFree(d_vel);
+    cudaFree(d_Erot);
     cudaFree(global_id);
 	cudaFree(global_id_sortted);
     cudaFree(local_id);
@@ -39,6 +41,7 @@ GPUParticles::~GPUParticles()
 void GPUParticles::UploadFromHost(const double* h_mass,
     const double3* h_pos,
     const double3* h_vel, 
+    const double* h_Erot,
     const int* h_global_id, const int* h_local_id, const int* h_cell_id)
 {
     size_t sizedoubles {N * sizeof(double)};   
@@ -47,6 +50,7 @@ void GPUParticles::UploadFromHost(const double* h_mass,
     cudaMemcpy(d_mass, h_mass, sizedoubles, cudaMemcpyHostToDevice);
     cudaMemcpy(d_pos, h_pos, sizedouble3s, cudaMemcpyHostToDevice);
     cudaMemcpy(d_vel, h_vel, sizedouble3s, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Erot, h_Erot, sizedoubles, cudaMemcpyHostToDevice);
 
     cudaMemcpy(global_id, h_global_id, sizeints, cudaMemcpyHostToDevice);
     cudaMemcpy(local_id, h_local_id, sizeints, cudaMemcpyHostToDevice);
@@ -74,42 +78,63 @@ void GPUParticles::DeleteInvalid(int* d_valid) {
     // 创建 Thrust 设备指针
     thrust::device_ptr<double3> pos_ptr(d_pos);
     thrust::device_ptr<double3> vel_ptr(d_vel);
-    thrust::device_ptr<double> mass_ptr(d_mass);
-    thrust::device_ptr<int> id_ptr(global_id);
-    thrust::device_ptr<int> cell_id_ptr(cell_id);
-    thrust::device_ptr<int> local_id_ptr(local_id);
-    thrust::device_ptr<int> id_sorted_ptr(global_id_sortted);
-    thrust::device_ptr<int> valid_ptr(d_valid);
-    // 创建临时数组（分配长度为 N）
-    thrust::device_vector<double3> new_pos(N);
-    thrust::device_vector<double3> new_vel(N);
-    thrust::device_vector<double>  new_mass(N);
-    thrust::device_vector<int>     new_id(N);
-    thrust::device_vector<int>     new_cell_id(N);
-    thrust::device_vector<int>     new_local_id(N);
-    thrust::device_vector<int>     new_sorted_id(N);
+    thrust::device_ptr<double>  Erot_ptr(d_Erot);
+    thrust::device_ptr<int>     id_ptr(global_id);
+    thrust::device_ptr<int>     cell_id_ptr(cell_id);
+    thrust::device_ptr<int>     local_id_ptr(local_id);
+    thrust::device_ptr<int>     id_sorted_ptr(global_id_sortted);
+    thrust::device_ptr<int>     valid_ptr(d_valid);
 
-    // 执行 copy_if 到新数组
-    auto new_end = thrust::copy_if(pos_ptr, pos_ptr + N, valid_ptr, new_pos.begin(), thrust::identity<int>());
-    int N_new = new_end - new_pos.begin();
+    // 处理 pos
+    auto pos_end = thrust::copy_if(pos_ptr, pos_ptr + N, valid_ptr, pos_ptr,
+    thrust::identity<int>()
+    );
+    int N_new = pos_end - pos_ptr;
 
-    thrust::copy_if(vel_ptr, vel_ptr + N, valid_ptr, new_vel.begin(), thrust::identity<int>());
-    thrust::copy_if(mass_ptr, mass_ptr + N, valid_ptr, new_mass.begin(), thrust::identity<int>());
-    thrust::copy_if(id_ptr, id_ptr + N, valid_ptr, new_id.begin(), thrust::identity<int>());
-    thrust::copy_if(cell_id_ptr, cell_id_ptr + N, valid_ptr, new_cell_id.begin(), thrust::identity<int>());
-    thrust::copy_if(local_id_ptr, local_id_ptr + N, valid_ptr, new_local_id.begin(), thrust::identity<int>());
-    thrust::copy_if(id_sorted_ptr, id_sorted_ptr + N, valid_ptr, new_sorted_id.begin(), thrust::identity<int>());
+    thrust::copy_if(
+        vel_ptr, vel_ptr + N,
+        valid_ptr,
+        vel_ptr,
+        thrust::identity<int>()
+    );
 
-    // 拷贝回原始数组
-    thrust::copy(new_pos.begin(), new_pos.begin() + N_new, pos_ptr);
-    thrust::copy(new_vel.begin(), new_vel.begin() + N_new, vel_ptr);
-    thrust::copy(new_mass.begin(), new_mass.begin() + N_new, mass_ptr);
-    thrust::copy(new_id.begin(), new_id.begin() + N_new, id_ptr);
-    thrust::copy(new_cell_id.begin(), new_cell_id.begin() + N_new, cell_id_ptr);
-    thrust::copy(new_local_id.begin(), new_local_id.begin() + N_new, local_id_ptr);
-    thrust::copy(new_sorted_id.begin(), new_sorted_id.begin() + N_new, id_sorted_ptr);
+    thrust::copy_if(
+        Erot_ptr, Erot_ptr + N,
+        valid_ptr,
+        Erot_ptr,
+        thrust::identity<int>()
+    );
 
-    std::cout <<"run out : "<< N - N_new << " particles"<<std::endl;
+    thrust::copy_if(
+        id_ptr, id_ptr + N,
+        valid_ptr,
+        id_ptr,
+        thrust::identity<int>()
+    );
+
+    thrust::copy_if(
+        cell_id_ptr, cell_id_ptr + N,
+        valid_ptr,
+        cell_id_ptr,
+        thrust::identity<int>()
+    );
+
+    thrust::copy_if(
+        local_id_ptr, local_id_ptr + N,
+        valid_ptr,
+        local_id_ptr,
+        thrust::identity<int>()
+    );
+
+    thrust::copy_if(
+        id_sorted_ptr, id_sorted_ptr + N,
+        valid_ptr,
+        id_sorted_ptr,
+        thrust::identity<int>()
+    );
+
+    std::cout << "run out : " << (N - N_new) << " particles" << std::endl;
+
     // 更新粒子数
     N = N_new;
 }
@@ -137,7 +162,7 @@ void GPUParticles::Injet()
     int numBlocks = (JetParticleNum + blockSize - 1) / blockSize;
     // reset injected counter
     cudaMemset(d_injectedCounter, 0, sizeof(int));
-    GPUParticleKernels::InjectParticles<<<numBlocks, blockSize>>>(d_pos, d_vel,
+    GPUParticleKernels::InjectParticles<<<numBlocks, blockSize>>>(d_pos, d_vel, d_Erot,
                                                                     global_id, N, 
                                                                 JetParticleNum, d_injectedCounter);
     N += JetParticleNum;
@@ -152,7 +177,8 @@ void GPUParticles::ResizeStorage(const int &newCapacity)
     // 分配新内存
     double3* new_d_pos;
     double3* new_d_vel;
-    double*  new_d_mass;
+    // double*  new_d_mass;
+    double* new_d_Erot;
     int*     new_d_id;
     int*     new_d_cell_id;
     int*     new_d_local_id;
@@ -160,7 +186,8 @@ void GPUParticles::ResizeStorage(const int &newCapacity)
 
     cudaMalloc(&new_d_pos, sizeof(double3) * newCapacity);
     cudaMalloc(&new_d_vel, sizeof(double3) * newCapacity);
-    cudaMalloc(&new_d_mass, sizeof(double) * newCapacity);
+    // cudaMalloc(&new_d_mass, sizeof(double) * newCapacity);
+    cudaMalloc(&new_d_Erot, sizeof(double) * newCapacity);
     cudaMalloc(&new_d_id, sizeof(int) * newCapacity);
     cudaMalloc(&new_d_cell_id, sizeof(int) * newCapacity);
     cudaMalloc(&new_d_local_id, sizeof(int) * newCapacity);
@@ -170,7 +197,8 @@ void GPUParticles::ResizeStorage(const int &newCapacity)
     // 拷贝旧数据
     cudaMemcpy(new_d_pos, d_pos, sizeof(double3) * N, cudaMemcpyDeviceToDevice);
     cudaMemcpy(new_d_vel, d_vel, sizeof(double3) * N, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(new_d_mass, d_mass, sizeof(double) * N, cudaMemcpyDeviceToDevice);
+    // cudaMemcpy(new_d_mass, d_mass, sizeof(double) * N, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_d_Erot, d_Erot, sizeof(double) * N, cudaMemcpyDeviceToDevice);
     cudaMemcpy(new_d_id, global_id, sizeof(int) * N, cudaMemcpyDeviceToDevice);
     cudaMemcpy(new_d_cell_id, cell_id, sizeof(int) * N, cudaMemcpyDeviceToDevice);
     cudaMemcpy(new_d_local_id, local_id, sizeof(int) * N, cudaMemcpyDeviceToDevice);
@@ -179,8 +207,8 @@ void GPUParticles::ResizeStorage(const int &newCapacity)
     // 释放旧内存
     cudaFree(d_pos);
     cudaFree(d_vel);
-    cudaFree(d_mass);
-    // cudaFree(d_valid);
+    // cudaFree(d_mass);
+    cudaFree(d_Erot);
     cudaFree(global_id);
     cudaFree(cell_id);
     cudaFree(local_id);
@@ -189,7 +217,8 @@ void GPUParticles::ResizeStorage(const int &newCapacity)
     // 更新指针与容量
     d_pos = new_d_pos;
     d_vel = new_d_vel;
-    d_mass = new_d_mass;
+    // d_mass = new_d_mass;
+    d_Erot = new_d_Erot;
     global_id = new_d_id;
     cell_id = new_d_cell_id;
     local_id = new_d_local_id;
@@ -346,6 +375,7 @@ __global__ void GPUParticleKernels::sortParticles(const int *cell_id, const int 
 __global__ void GPUParticleKernels::InjectParticles(
     double3* d_pos,
     double3* d_vel,
+    double* d_Erot,
     int*     d_globalID,
     int N,                      // 已有的粒子数
     int maxInject,              // 注入的粒子数
@@ -375,6 +405,8 @@ __global__ void GPUParticleKernels::InjectParticles(
     auto velocity {GPURandomKernels::MaxwellDistribution(Vstd, localState)};
     velocity.x += V_jet;
     // velocity.y += 0.5 * V_jet;
+    // ----------------- 采样转动能量 -----------------
+    auto Erot {GPURandomKernels::RotatinalEnergySample(localState)};
 
     // ----------------- 原子分配 global_id -----------------
     int index = atomicAdd(d_injectedCounter, 1);  // 分配当前粒子在数组中的 index（全局 ID）
@@ -385,6 +417,7 @@ __global__ void GPUParticleKernels::InjectParticles(
     d_pos[index] = make_double3(x, y, z);
     // d_vel[index] = make_double3(vx, vy, vz);
     d_vel[index] = velocity;
+    // d_Erot[index] = Erot;
     d_globalID[index] = index;
 }
 
@@ -404,4 +437,9 @@ __device__ double3 GPURandomKernels::MaxwellDistribution(const double& Vstd, cur
     double w = sqrt(-log(rd1)) * sin(2.0 * M_PI * rd2) * Vstd;
 
     return make_double3(u, v, w);
+}
+
+__device__ double GPURandomKernels::RotatinalEnergySample(curandState &localState)
+{
+    return -log(curand_uniform(&localState)) * boltz * T;
 }
